@@ -1,0 +1,21 @@
+# Environments
+.env
+.env.local
+.env.*.local
+
+# Credentials
+credentials/
+*.json
+!package.json
+!package-lock.json
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
+.next/
