@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, Any
 from backend.models.schemas import TaskTriggerEvent
 from backend.repositories.message_bus import MessageBus, MessageContext
 
@@ -30,10 +30,15 @@ class InMemoryMessageBus(MessageBus):
             self.topics[topic] = asyncio.Queue()
         return self.topics[topic]
 
-    async def publish(self, topic: str, message: TaskTriggerEvent) -> None:
+    async def publish(self, topic: str, message: Any) -> None:
         queue = self._get_queue(topic)
         await queue.put(message)
-        logger.info(f"Published to {topic}: {message.task_id}")
+        
+        msg_id = getattr(message, "task_id", getattr(message, "schedule_id", str(message)))
+        if isinstance(message, dict):
+            msg_id = message.get("task_id") or message.get("schedule_id", str(message))
+            
+        logger.info(f"Published to {topic}: {msg_id}")
         
     async def consume(self, topic: str, handler: Callable[[TaskTriggerEvent, MessageContext], Awaitable[None]]) -> None:
         queue = self._get_queue(topic)

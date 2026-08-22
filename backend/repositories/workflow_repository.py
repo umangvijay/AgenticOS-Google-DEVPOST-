@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, List
 from backend.models.schemas import WorkflowRun, Task, TaskStatus
+from backend.models.security import ApprovalRequest
 
 class WorkflowRepository(ABC):
     @abstractmethod
@@ -16,12 +17,30 @@ class WorkflowRepository(ABC):
         pass
         
     @abstractmethod
-    def update_task(self, run_id: str, task: Task) -> None:
+    def update_task(self, run_id: str, task: Task, pending_approval: Optional[ApprovalRequest] = None) -> None:
+        pass
+        
+    @abstractmethod
+    def create_if_absent(self, run: WorkflowRun) -> bool:
+        pass
+        
+    @abstractmethod
+    def get_approval(self, approval_id: str) -> Optional[ApprovalRequest]:
+        pass
+        
+    @abstractmethod
+    def list_pending_approvals(self, user_id: str) -> List[ApprovalRequest]:
+        pass
+        
+    @abstractmethod
+    def resolve_approval(self, approval_id: str, new_status: str, decision_by: str) -> bool:
+        """Atomically transition a PENDING approval to APPROVED or REJECTED. Returns True if successful."""
         pass
         
 class InMemoryWorkflowRepository(WorkflowRepository):
     def __init__(self):
         self._store = {}
+        self._approvals_store = {}
         
     def save_run(self, run: WorkflowRun) -> None:
         self._store[run.run_id] = run
@@ -45,10 +64,46 @@ class InMemoryWorkflowRepository(WorkflowRepository):
                     return True
         return False
         
-    def update_task(self, run_id: str, task: Task) -> None:
+    def update_task(self, run_id: str, task: Task, pending_approval: Optional[ApprovalRequest] = None) -> None:
         run = self.get_run(run_id)
         if not run: return
         for i, t in enumerate(run.tasks):
             if t.task_id == task.task_id:
                 run.tasks[i] = task
                 break
+                
+        if pending_approval:
+            self._approvals_store[pending_approval.approval_id] = pending_approval
+                
+    def create_if_absent(self, run: WorkflowRun) -> bool:
+        if run.run_id in self._store:
+            return False
+        self._store[run.run_id] = run
+        return True
+        
+    def get_approval(self, approval_id: str) -> Optional[ApprovalRequest]:
+        return self._approvals_store.get(approval_id)
+        
+    def list_pending_approvals(self, user_id: str) -> List[ApprovalRequest]:
+        from backend.models.security import ApprovalStatus
+        return [
+            a for a in self._approvals_store.values()
+            if a.user_id == user_id and a.status == ApprovalStatus.PENDING
+        ]
+        
+    def resolve_approval(self, approval_id: str, new_status: str, decision_by: str) -> bool:
+        from backend.models.security import ApprovalStatus
+        from datetime import datetime, timezone
+        
+        approval = self._approvals_store.get(approval_id)
+        if not approval:
+            return False
+            
+        # Atomic compare-and-set logic (in-memory implementation)
+        if approval.status != ApprovalStatus.PENDING:
+            return False
+            
+        approval.status = new_status
+        approval.decision_by = decision_by
+        approval.decision_at = datetime.now(timezone.utc)
+        return True

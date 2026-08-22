@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     FIRESTORE_COLLECTION_TASKS: str = "tasks"
     
     GEMINI_MODEL: str = "gemini-3.5-flash"
+    GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
     GEMINI_API_KEY: Optional[str] = None
     
     model_config = SettingsConfigDict(

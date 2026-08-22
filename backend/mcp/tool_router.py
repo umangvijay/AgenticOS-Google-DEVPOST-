@@ -3,6 +3,8 @@ from typing import Dict, Any, List, Optional
 from backend.repositories.mcp_repository import MCPRepository
 from backend.mcp.tool_policy import ToolPolicy
 from backend.mcp.mcp_client import MCPClientManager
+from backend.services.approvals_engine import ApprovalsEngine, ApprovalRequiredException
+from backend.models.security import AutonomyLevel
 
 logger = logging.getLogger(__name__)
 
@@ -10,9 +12,10 @@ class ToolRouterError(Exception):
     pass
 
 class ToolRouter:
-    def __init__(self, mcp_repo: MCPRepository, policy: ToolPolicy):
+    def __init__(self, mcp_repo: MCPRepository, policy: ToolPolicy, approvals_engine: Optional[ApprovalsEngine] = None):
         self.mcp_repo = mcp_repo
         self.policy = policy
+        self.approvals_engine = approvals_engine
 
     async def get_tool_catalog(self) -> List[Dict[str, Any]]:
         """Returns the list of tools that the agent is allowed to use."""
@@ -36,7 +39,7 @@ class ToolRouter:
                 })
         return catalog
 
-    async def execute_tool(self, agent_tool_name: str, arguments: Dict[str, Any]) -> Any:
+    async def execute_tool(self, agent_tool_name: str, arguments: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Any:
         """The absolute and ONLY execution boundary for external tools."""
         if "__" not in agent_tool_name:
             raise ToolRouterError(f"Invalid tool name format: {agent_tool_name}")
@@ -58,6 +61,31 @@ class ToolRouter:
         policy_result = self.policy.is_allowed(tool, mcp)
         if not policy_result.allowed:
             raise ToolRouterError(f"Policy Denied: {policy_result.reason}")
+
+        # 3.5. Evaluate Risk & Approvals (Phase 10)
+        context = context or {}
+        if self.approvals_engine:
+            autonomy_level = context.get("autonomy_level", AutonomyLevel.L0_MANUAL)
+            if self.approvals_engine.requires_approval(autonomy_level, tool.risk_level):
+                # Is there a pre-approved request passed in context?
+                approved_request = context.get("approved_request")
+                if approved_request:
+                    self.approvals_engine.validate_approval_for_execution(approved_request, arguments)
+                    logger.info(f"Execution authorized by approval {approved_request.approval_id}")
+                else:
+                    # Request an approval
+                    pending_approval = self.approvals_engine.create_approval_request(
+                        user_id=context.get("user_id", "system"),
+                        tool_name=tool_name,
+                        tool_version=tool.mcp_version,
+                        risk_level=tool.risk_level,
+                        autonomy_level=autonomy_level,
+                        arguments=arguments,
+                        workflow_id=context.get("workflow_id", "unknown"),
+                        run_id=context.get("run_id", "unknown"),
+                        task_id=context.get("task_id", "unknown")
+                    )
+                    raise ApprovalRequiredException("Human approval is required for this action.", pending_approval)
 
         # 4. Execute via MCP Client
         try:

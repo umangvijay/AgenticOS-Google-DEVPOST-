@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Any, Dict
 from datetime import datetime, timezone
+from enum import Enum
 
 class TaskStatus(str):
     PENDING = "PENDING"
@@ -11,10 +12,26 @@ class TaskStatus(str):
     RETRYING = "RETRYING"
     CANCELLED = "CANCELLED"
     BLOCKED = "BLOCKED"
+    WAITING_APPROVAL = "WAITING_APPROVAL"
+    RECOVERING = "RECOVERING"
 
-class ErrorType(str):
-    RETRYABLE = "RETRYABLE"
-    NON_RETRYABLE = "NON_RETRYABLE"
+class ErrorType(str, Enum):
+    SEMANTIC_ERROR = "SEMANTIC_ERROR"
+    VALIDATION_ERROR = "VALIDATION_ERROR"
+    TRANSIENT_ERROR = "TRANSIENT_ERROR"
+    AUTHORIZATION_ERROR = "AUTHORIZATION_ERROR"
+    CONFIGURATION_ERROR = "CONFIGURATION_ERROR"
+    TIMEOUT_ERROR = "TIMEOUT_ERROR"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+
+class SemanticErrorReason(str, Enum):
+    INVALID_ARGUMENT = "INVALID_ARGUMENT"
+    SCHEMA_MISMATCH = "SCHEMA_MISMATCH"
+    MISSING_REQUIRED_FIELD = "MISSING_REQUIRED_FIELD"
+    INVALID_ENUM = "INVALID_ENUM"
+    TYPE_MISMATCH = "TYPE_MISMATCH"
+    INVALID_PARAMETER_FORMAT = "INVALID_PARAMETER_FORMAT"
+    TOOL_SEMANTIC_REJECTION = "TOOL_SEMANTIC_REJECTION"
 
 class TaskDefinition(BaseModel):
     task_id: str = Field(description="Unique identifier for the task within the workflow")
@@ -49,6 +66,14 @@ class Task(BaseModel):
     timeout_seconds: int = 60
     max_retries: int = 3
     
+    # Phase 11: Self-Healing
+    recovery_enabled: bool = False
+    max_recoveries: int = 3
+    max_total_attempts: int = 5
+    recovery_attempts: int = 0
+    original_input: Optional[Dict[str, Any]] = None
+    recovery_history: List[Dict[str, Any]] = Field(default_factory=list)
+    
     error: Optional[str] = None
     error_type: Optional[str] = None
     trace_id: Optional[str] = None
@@ -71,4 +96,11 @@ class TaskTriggerEvent(BaseModel):
     workflow_id: str
     run_id: str
     task_id: str
+    trace_id: Optional[str] = None
+
+class TaskRecoveryEvent(BaseModel):
+    workflow_id: str
+    run_id: str
+    task_id: str
+    recovery_attempt: int
     trace_id: Optional[str] = None

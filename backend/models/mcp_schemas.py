@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from enum import Enum
+from backend.models.security import RiskLevel
 
 class AuthType(str, Enum):
     NONE = "NONE"
@@ -67,6 +68,8 @@ class CachedToolDefinition(BaseModel):
     expires_at: datetime
     # Phase 4: Operation-level auth binding
     auth_requirements: List[OperationAuthRequirement] = Field(default_factory=list)
+    # Phase 10: Authoritative risk level from the Registry
+    risk_level: RiskLevel = RiskLevel.CRITICAL
 
 class ToolPolicyResult(BaseModel):
     allowed: bool

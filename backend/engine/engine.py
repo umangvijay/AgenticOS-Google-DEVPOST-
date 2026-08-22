@@ -9,13 +9,19 @@ from backend.repositories.message_bus import MessageBus
 from backend.agents.orchestrator.orchestrator_agent import get_orchestrator_agent
 from google.adk.runners import InMemoryRunner
 from backend.config.settings import settings
+from backend.agents.agent_factory import AgentFactory
+from backend.services.runtime_snapshot import RuntimeSnapshotRegistry
+from backend.services.approvals_engine import ApprovalRequiredException
+from backend.models.schemas import TaskRecoveryEvent, SemanticErrorReason
+from backend.models.exceptions import SemanticException
 
 logger = logging.getLogger(__name__)
 
 class WorkflowEngine:
-    def __init__(self, workflow_repo: WorkflowRepository, message_bus: MessageBus):
+    def __init__(self, workflow_repo: WorkflowRepository, message_bus: MessageBus, agent_factory: AgentFactory = None):
         self.repo = workflow_repo
         self.message_bus = message_bus
+        self.agent_factory = agent_factory
 
     async def evaluate_dag(self, run_id: str) -> None:
         """
@@ -114,6 +120,10 @@ class WorkflowEngine:
 
         # Attempt atomic claim
         lease_seconds = max(task.timeout_seconds + 10, 60)
+        # Only claim if it's not RECOVERING (RECOVERING is claimed by RecoveryWorker)
+        if task.status == TaskStatus.RECOVERING:
+            return
+            
         claimed = self.repo.claim_task(run_id, task_id, lease_seconds)
         if not claimed:
             logger.info(f"Task {task_id} already claimed or completed.")
@@ -126,8 +136,32 @@ class WorkflowEngine:
         try:
             # Execute with timeout
             async def _run_agent():
-                # Phase 2: OrchestratorAgent only for simplicity, but can be dynamic
-                agent = get_orchestrator_agent()
+                # Get the pinned snapshot version from the run if it exists, otherwise use latest
+                # (For simplicity we assume run.snapshot_version exists or we use latest and pin it)
+                snapshot_version = getattr(run, 'snapshot_version', None)
+                
+                # If a specific agent_id is requested, build it from the factory
+                agent_id = getattr(task, 'agent_id', None)
+                if agent_id and self.agent_factory:
+                    context = {
+                        "run_id": run_id,
+                        "task_id": task_id,
+                        "workflow_id": run.workflow_id,
+                        "user_id": run.user_id
+                    }
+                    
+                    approved_req_id = task.input_data.get("_approved_request_id")
+                    if approved_req_id:
+                        context["approved_request"] = self.repo.get_approval(approved_req_id)
+                        
+                    # In a real implementation we would fetch the pinned snapshot from the factory
+                    agent = self.agent_factory.build_agent(agent_id, context=context)
+                    if not agent:
+                        raise ValueError(f"Plugin agent {agent_id} could not be resolved.")
+                else:
+                    # Fallback to Phase 2 default OrchestratorAgent
+                    agent = get_orchestrator_agent()
+                    
                 runner = InMemoryRunner(agent=agent, app_name=settings.APP_NAME)
                 # In real app, we pass task.input_data
                 events = await runner.run_debug(f"Execute step: {task.task_id}")
@@ -144,20 +178,62 @@ class WorkflowEngine:
             # Evaluate DAG for downstream tasks
             await self.evaluate_dag(run_id)
             
+        except ApprovalRequiredException as e:
+            logger.info(f"Task {task_id} requires human approval: {e.pending_approval.approval_id}")
+            task.status = TaskStatus.WAITING_APPROVAL
+            # Atomically save task status and approval request
+            self.repo.update_task(run_id, task, pending_approval=e.pending_approval)
+            # Evaluate DAG is not needed because WAITING_APPROVAL just blocks downstream
         except asyncio.TimeoutError:
             logger.warning(f"Task {task_id} timed out after {task.timeout_seconds}s")
-            self._handle_task_failure(run_id, task, "TimeoutError", ErrorType.RETRYABLE)
+            self._handle_task_failure(run_id, task, "TimeoutError", ErrorType.TIMEOUT_ERROR)
+        except SemanticException as e:
+            logger.error(f"Task {task_id} semantic failure: {e.message}")
+            self._handle_task_failure(run_id, task, e.message, ErrorType.SEMANTIC_ERROR, e.reason)
         except Exception as e:
             logger.error(f"Task {task_id} failed: {e}")
-            # Simplified error categorization
-            error_type = ErrorType.RETRYABLE if "network" in str(e).lower() else ErrorType.NON_RETRYABLE
+            error_type = ErrorType.TRANSIENT_ERROR if "network" in str(e).lower() else ErrorType.INTERNAL_ERROR
             self._handle_task_failure(run_id, task, str(e), error_type)
 
-    def _handle_task_failure(self, run_id: str, task: Task, error_msg: str, error_type: str) -> None:
+    def _handle_task_failure(self, run_id: str, task: Task, error_msg: str, error_type: str, semantic_reason: Optional[SemanticErrorReason] = None) -> None:
         task.error = error_msg
         task.error_type = error_type
         
-        if error_type == ErrorType.RETRYABLE and task.attempt < task.max_retries:
+        # Determine total attempts
+        total_attempts = task.attempt + task.recovery_attempts
+        
+        if total_attempts >= task.max_total_attempts:
+            logger.error(f"Task {task.task_id} exhausted max_total_attempts ({task.max_total_attempts}). Failing permanently.")
+            task.status = TaskStatus.FAILED
+            task.completed_at = datetime.now(timezone.utc)
+            self.repo.update_task(run_id, task)
+            asyncio.create_task(self.evaluate_dag(run_id))
+            return
+
+        # Phase 11: Self-Healing
+        if error_type == ErrorType.SEMANTIC_ERROR and task.recovery_enabled and task.recovery_attempts < task.max_recoveries:
+            task.status = TaskStatus.RECOVERING
+            
+            # Save original input on first failure
+            if task.original_input is None:
+                task.original_input = task.input_data.copy()
+                
+            self.repo.update_task(run_id, task)
+            logger.info(f"Task {task.task_id} entered RECOVERING state. Attempt {task.recovery_attempts + 1}/{task.max_recoveries}")
+            
+            async def trigger_recovery():
+                event = TaskRecoveryEvent(
+                    workflow_id=task.workflow_id,
+                    run_id=run_id,
+                    task_id=task.task_id,
+                    recovery_attempt=task.recovery_attempts + 1
+                )
+                await self.message_bus.publish("agentos-recovery-events", event)
+                
+            asyncio.create_task(trigger_recovery())
+            return
+
+        if error_type in [ErrorType.TRANSIENT_ERROR, ErrorType.TIMEOUT_ERROR] and task.attempt < task.max_retries:
             task.status = TaskStatus.RETRYING
             self.repo.update_task(run_id, task)
             delay = self._calculate_backoff(task.attempt)
