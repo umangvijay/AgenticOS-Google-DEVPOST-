@@ -13,6 +13,15 @@ class AuthMetadata(BaseModel):
     type: AuthType = AuthType.NONE
     credential_ref: Optional[str] = Field(None, description="Reference to Secret Manager or Config")
 
+class ConnectorState(str, Enum):
+    DRAFT = "DRAFT"
+    PENDING_CREDENTIALS = "PENDING_CREDENTIALS"
+    VALIDATING = "VALIDATING"
+    HEALTHY = "HEALTHY"
+    ENABLED = "ENABLED"
+    DISABLED = "DISABLED"
+    FAILED = "FAILED"
+
 class MCPHealthStatus(str, Enum):
     HEALTHY = "HEALTHY"
     UNHEALTHY = "UNHEALTHY"
@@ -32,10 +41,21 @@ class MCPManifest(BaseModel):
     scopes: List[str] = Field(default_factory=list)
     health: MCPHealthStatus = MCPHealthStatus.UNKNOWN
     health_updated_at: Optional[datetime] = None
+    # Phase 4 Metadata
+    state: ConnectorState = ConnectorState.DRAFT
+    spec_hash: Optional[str] = None
+    spec_version: Optional[str] = None
+    source_uri: Optional[str] = None
+    built_at: Optional[datetime] = None
+
     owner: str = "system"
     is_enabled: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class OperationAuthRequirement(BaseModel):
+    auth_scheme: str
+    required_scopes: List[str] = Field(default_factory=list)
 
 class CachedToolDefinition(BaseModel):
     tool_name: str
@@ -45,6 +65,8 @@ class CachedToolDefinition(BaseModel):
     mcp_version: str
     discovered_at: datetime
     expires_at: datetime
+    # Phase 4: Operation-level auth binding
+    auth_requirements: List[OperationAuthRequirement] = Field(default_factory=list)
 
 class ToolPolicyResult(BaseModel):
     allowed: bool
