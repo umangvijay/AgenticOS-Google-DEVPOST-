@@ -1,0 +1,60 @@
+from backend.models.schemas import WorkflowDefinition
+import logging
+
+logger = logging.getLogger(__name__)
+
+class DAGValidationError(Exception):
+    pass
+
+def validate_dag(definition: WorkflowDefinition) -> None:
+    task_ids = set()
+    dependencies_map = {}
+    
+    # 1. Duplicate task IDs and basic validation
+    for task in definition.tasks:
+        if task.task_id in task_ids:
+            raise DAGValidationError(f"Duplicate task ID found: {task.task_id}")
+        
+        if task.timeout_seconds <= 0:
+            raise DAGValidationError(f"Invalid timeout for task {task.task_id}")
+            
+        if task.max_retries < 0:
+            raise DAGValidationError(f"Invalid max_retries for task {task.task_id}")
+            
+        # Hardcoded check for known agents - in a real app, this would query a registry
+        # Phase 1 only uses OrchestratorAgent, PlannerAgent, IntentAgent
+        if task.agent not in ["IntentAgent", "PlannerAgent", "OrchestratorAgent"]:
+            raise DAGValidationError(f"Unknown agent: {task.agent}")
+            
+        task_ids.add(task.task_id)
+        dependencies_map[task.task_id] = task.dependencies
+
+    # 2. Check for unknown or self dependencies
+    for task_id, deps in dependencies_map.items():
+        for dep in deps:
+            if dep not in task_ids:
+                raise DAGValidationError(f"Unknown dependency '{dep}' for task '{task_id}'")
+            if dep == task_id:
+                raise DAGValidationError(f"Self-dependency detected for task '{task_id}'")
+                
+    # 3. Detect cycles using DFS
+    visited = set()
+    stack = set()
+    
+    def dfs(current_id: str):
+        visited.add(current_id)
+        stack.add(current_id)
+        
+        for dep in dependencies_map.get(current_id, []):
+            if dep not in visited:
+                dfs(dep)
+            elif dep in stack:
+                raise DAGValidationError(f"Cycle detected in DAG involving task: {dep}")
+                
+        stack.remove(current_id)
+
+    for task_id in task_ids:
+        if task_id not in visited:
+            dfs(task_id)
+
+    logger.info(f"DAG validation successful for {len(task_ids)} tasks.")

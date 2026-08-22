@@ -1,5 +1,5 @@
 from google.cloud import firestore
-from backend.models.schemas import WorkflowRun
+from backend.models.schemas import WorkflowRun, Task, TaskStatus
 from backend.repositories.workflow_repository import WorkflowRepository
 from backend.config.settings import settings
 import logging
@@ -27,3 +27,85 @@ class FirestoreWorkflowRepository(WorkflowRepository):
         if doc.exists:
             return WorkflowRun(**doc.to_dict())
         return None
+        
+    def claim_task(self, run_id: str, task_id: str, lease_seconds: int) -> bool:
+        from datetime import datetime, timedelta, timezone
+        
+        transaction = self.db.transaction()
+        doc_ref = self.collection.document(run_id)
+        
+        @firestore.transactional
+        def _claim(transaction, doc_ref):
+            snapshot = doc_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                return False
+                
+            run_data = snapshot.to_dict()
+            tasks = run_data.get("tasks", [])
+            
+            claimed = False
+            for t in tasks:
+                if t.get("task_id") == task_id:
+                    status = t.get("status")
+                    lease_expires_str = t.get("lease_expires_at")
+                    
+                    now = datetime.now(timezone.utc)
+                    
+                    can_claim = False
+                    if status in [TaskStatus.PENDING, TaskStatus.RETRYING]:
+                        can_claim = True
+                    elif status == TaskStatus.RUNNING and lease_expires_str:
+                        # Check if stale
+                        try:
+                            # Firestore stores datetimes as google.api.core.datetime_helpers.DatetimeWithNanoseconds
+                            # or ISO strings if we dumped it as JSON. We used `model_dump(mode='json')`, so it's a string.
+                            if isinstance(lease_expires_str, str):
+                                # Ensure it handles Z
+                                lease_expires = datetime.fromisoformat(lease_expires_str.replace("Z", "+00:00"))
+                            else:
+                                lease_expires = lease_expires_str
+                            
+                            if lease_expires < now:
+                                can_claim = True
+                        except Exception as e:
+                            logger.error(f"Error parsing lease_expires_at: {e}")
+                            
+                    if can_claim:
+                        t["status"] = TaskStatus.RUNNING
+                        t["lease_started_at"] = now.isoformat()
+                        t["lease_expires_at"] = (now + timedelta(seconds=lease_seconds)).isoformat()
+                        t["attempt"] = t.get("attempt", 0) + 1
+                        claimed = True
+                    break
+                    
+            if claimed:
+                transaction.update(doc_ref, {"tasks": tasks})
+                return True
+            return False
+            
+        return _claim(transaction, doc_ref)
+        
+    def update_task(self, run_id: str, task: Task) -> None:
+        transaction = self.db.transaction()
+        doc_ref = self.collection.document(run_id)
+        
+        @firestore.transactional
+        def _update(transaction, doc_ref):
+            snapshot = doc_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                return
+                
+            run_data = snapshot.to_dict()
+            tasks = run_data.get("tasks", [])
+            
+            updated = False
+            for i, t in enumerate(tasks):
+                if t.get("task_id") == task.task_id:
+                    tasks[i] = task.model_dump(mode='json')
+                    updated = True
+                    break
+                    
+            if updated:
+                transaction.update(doc_ref, {"tasks": tasks})
+                
+        _update(transaction, doc_ref)
