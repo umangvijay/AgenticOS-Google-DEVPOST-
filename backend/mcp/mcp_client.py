@@ -34,13 +34,34 @@ class MCPClientManager:
                     result = await session.list_tools()
                     tools = result.tools
         elif manifest.transport == MCPTransportType.STDIO:
-            # endpoint is the executable path
-            server_params = StdioServerParameters(command=manifest.endpoint, args=[])
-            async with stdio_client(server_params) as streams:
-                async with ClientSession(streams[0], streams[1]) as session:
-                    await session.initialize()
-                    result = await session.list_tools()
-                    tools = result.tools
+            from backend.mcp.sandbox.sandbox_controller import SandboxController
+            from backend.mcp.sandbox.audit_logger import audit_logger
+            
+            import shlex
+            parts = shlex.split(manifest.endpoint)
+            base_cmd = parts[0] if parts else ""
+            args = parts[1:] if len(parts) > 1 else []
+            
+            docker_cmd, docker_args = SandboxController.apply_docker_sandbox(
+                manifest=manifest,
+                command=base_cmd,
+                args=args
+            )
+            
+            server_params = StdioServerParameters(command=docker_cmd, args=docker_args)
+            try:
+                async with asyncio.timeout(15): # Python 3.11+
+                    async with stdio_client(server_params) as streams:
+                        async with ClientSession(streams[0], streams[1]) as session:
+                            await session.initialize()
+                            result = await session.list_tools()
+                            tools = result.tools
+            except asyncio.TimeoutError:
+                audit_logger.log_sandbox_timeout(manifest.mcp_id, 15)
+                raise RuntimeError(f"Sandbox Execution Timeout for {manifest.mcp_id}")
+            except Exception as e:
+                audit_logger.log_sandbox_violation(manifest.mcp_id, "EXECUTION_ERROR", str(e))
+                raise
 
         # Convert to CachedToolDefinition
         cached_tools = []
@@ -75,11 +96,33 @@ class MCPClientManager:
                     result = await session.call_tool(tool_name, arguments)
                     return result.content
         elif manifest.transport == MCPTransportType.STDIO:
-            server_params = StdioServerParameters(command=manifest.endpoint, args=[])
-            async with stdio_client(server_params) as streams:
-                async with ClientSession(streams[0], streams[1]) as session:
-                    await session.initialize()
-                    result = await session.call_tool(tool_name, arguments)
-                    return result.content
+            from backend.mcp.sandbox.sandbox_controller import SandboxController
+            from backend.mcp.sandbox.audit_logger import audit_logger
+            
+            import shlex
+            parts = shlex.split(manifest.endpoint)
+            base_cmd = parts[0] if parts else ""
+            args = parts[1:] if len(parts) > 1 else []
+            
+            docker_cmd, docker_args = SandboxController.apply_docker_sandbox(
+                manifest=manifest,
+                command=base_cmd,
+                args=args
+            )
+            server_params = StdioServerParameters(command=docker_cmd, args=docker_args)
+            
+            try:
+                async with asyncio.timeout(15):
+                    async with stdio_client(server_params) as streams:
+                        async with ClientSession(streams[0], streams[1]) as session:
+                            await session.initialize()
+                            result = await session.call_tool(tool_name, arguments)
+                            return result.content
+            except asyncio.TimeoutError:
+                audit_logger.log_sandbox_timeout(manifest.mcp_id, 15)
+                raise RuntimeError(f"Sandbox Execution Timeout calling {tool_name}")
+            except Exception as e:
+                audit_logger.log_sandbox_violation(manifest.mcp_id, "TOOL_EXECUTION_ERROR", str(e))
+                raise e
         else:
             raise ValueError(f"Unknown transport {manifest.transport}")
