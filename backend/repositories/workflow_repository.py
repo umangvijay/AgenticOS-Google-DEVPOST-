@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Optional, List
-from backend.models.schemas import WorkflowRun, Task, TaskStatus
+from backend.models.schemas import WorkflowRun, Task, TaskStatus, WorkflowEvent
 from backend.models.security import ApprovalRequest
+from typing import AsyncGenerator
 
 class WorkflowRepository(ABC):
     @abstractmethod
@@ -37,10 +38,20 @@ class WorkflowRepository(ABC):
         """Atomically transition a PENDING approval to APPROVED or REJECTED. Returns True if successful."""
         pass
         
+    @abstractmethod
+    def save_event(self, event: WorkflowEvent) -> None:
+        pass
+        
+    @abstractmethod
+    async def stream_events(self, run_id: str) -> AsyncGenerator[WorkflowEvent, None]:
+        pass
+        
 class InMemoryWorkflowRepository(WorkflowRepository):
     def __init__(self):
         self._store = {}
         self._approvals_store = {}
+        self._events_store = {}
+        self._event_queues = {}
         
     def save_run(self, run: WorkflowRun) -> None:
         self._store[run.run_id] = run
@@ -107,3 +118,31 @@ class InMemoryWorkflowRepository(WorkflowRepository):
         approval.decision_by = decision_by
         approval.decision_at = datetime.now(timezone.utc)
         return True
+        
+    def save_event(self, event: WorkflowEvent) -> None:
+        if event.run_id not in self._events_store:
+            self._events_store[event.run_id] = []
+        self._events_store[event.run_id].append(event)
+        
+        # Publish to any active streams
+        if event.run_id in self._event_queues:
+            import asyncio
+            for q in self._event_queues[event.run_id]:
+                asyncio.run_coroutine_threadsafe(q.put(event), asyncio.get_event_loop())
+                
+    async def stream_events(self, run_id: str) -> AsyncGenerator[WorkflowEvent, None]:
+        import asyncio
+        if run_id not in self._event_queues:
+            self._event_queues[run_id] = []
+            
+        queue = asyncio.Queue()
+        self._event_queues[run_id].append(queue)
+        
+        try:
+            while True:
+                event = await queue.get()
+                yield event
+        finally:
+            self._event_queues[run_id].remove(queue)
+            if not self._event_queues[run_id]:
+                del self._event_queues[run_id]

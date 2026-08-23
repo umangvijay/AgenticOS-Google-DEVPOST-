@@ -1,89 +1,131 @@
 "use client";
-import { useState } from "react";
+
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { submitGoal, listApprovals, ApprovalRequest } from "@/lib/api";
+import { Play, Activity, Clock, CheckCircle, ShieldAlert } from "lucide-react";
 
 export default function Dashboard() {
+  const router = useRouter();
   const [goal, setGoal] = useState("");
-  const [runData, setRunData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const loadDashboardData = async () => {
+    try {
+      const pendingApprovals = await listApprovals();
+      setApprovals(pendingApprovals);
+    } catch (err) {
+      console.error("Failed to load dashboard data", err);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!goal.trim()) return;
+    
     setLoading(true);
-    setRunData(null);
+    setError("");
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const response = await fetch(`${apiUrl}/api/v1/intent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goal }),
-      });
-      const data = await response.json();
-      setRunData(data);
-    } catch (error) {
-      console.error("Error executing goal:", error);
-      setRunData({ status: "FAILED", result: { error: "Failed to connect to backend API." } });
+      const response = await submitGoal(goal);
+      if (response.run_id) {
+        router.push(`/workflow/${response.run_id}`);
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to submit goal");
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
-    <div className="min-h-screen bg-black text-white p-8 font-sans">
-      <div className="max-w-3xl mx-auto space-y-8">
-        <header className="space-y-2">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
-            AgentOS Workspace
-          </h1>
-          <p className="text-gray-400">Phase 1 End-to-End Vertical Slice</p>
-        </header>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <input
-            type="text"
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
-            placeholder="What do you want AgentOS to do? (e.g. 'What time is it in UTC?')"
-            className="w-full p-4 rounded-xl bg-gray-900 border border-gray-800 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 text-lg transition-all"
-          />
-          <button
-            type="submit"
-            disabled={loading || !goal}
-            className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl font-semibold shadow-lg transition-all"
-          >
-            {loading ? "Executing Agents..." : "Start Agent"}
-          </button>
-        </form>
-
-        {runData && (
-          <div className="space-y-6 pt-8 border-t border-gray-800 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <h2 className="text-2xl font-semibold">Execution Timeline</h2>
-            
-            <div className="bg-gray-900 p-6 rounded-xl space-y-4 border border-gray-800 shadow-xl">
-              <div className="flex justify-between items-center pb-4 border-b border-gray-800">
-                <span className="text-gray-400">Run ID</span>
-                <span className="font-mono text-xs bg-gray-800 px-2 py-1 rounded">{runData.run_id || 'N/A'}</span>
-              </div>
-              
-              <div className="flex justify-between items-center pb-4 border-b border-gray-800">
-                <span className="text-gray-400">Status</span>
-                <span className={`font-semibold px-3 py-1 rounded-full text-sm ${
-                  runData.status === 'COMPLETED' ? 'bg-green-500/20 text-green-400' : 
-                  runData.status === 'FAILED' ? 'bg-red-500/20 text-red-400' : 
-                  'bg-yellow-500/20 text-yellow-400'
-                }`}>
-                  {runData.status}
-                </span>
-              </div>
-
-              <div className="space-y-3 pt-2">
-                <span className="text-gray-400 block">Agent Results:</span>
-                <pre className="bg-black p-4 rounded-lg text-sm overflow-x-auto border border-gray-800 text-gray-300">
-                  {JSON.stringify(runData.result, null, 2)}
-                </pre>
-              </div>
-            </div>
+    <div className="flex-1 p-6 lg:p-12 space-y-12">
+      {/* Hero Input Section */}
+      <section className="max-w-4xl mx-auto space-y-6 text-center">
+        <h2 className="text-4xl lg:text-5xl font-extrabold tracking-tight">
+          What can <span className="bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">AgenticOS</span> do for you?
+        </h2>
+        
+        <form onSubmit={handleSubmit} className="relative group">
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-2xl blur opacity-25 group-hover:opacity-40 transition duration-500"></div>
+          <div className="relative flex items-center bg-card border border-border rounded-2xl shadow-2xl overflow-hidden glass">
+            <input
+              type="text"
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              placeholder="e.g. 'Deploy a new staging environment' or 'Analyze recent security logs'"
+              className="w-full px-6 py-5 bg-transparent border-none focus:outline-none focus:ring-0 text-lg lg:text-xl placeholder:text-muted-foreground"
+              disabled={loading}
+            />
+            <button
+              type="submit"
+              disabled={loading || !goal.trim()}
+              className="m-2 px-6 py-3 bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-semibold transition-all flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <>
+                  <span>Execute</span>
+                  <Play className="w-4 h-4" />
+                </>
+              )}
+            </button>
           </div>
-        )}
-      </div>
+          {error && <p className="text-destructive mt-3 text-sm text-left px-2">{error}</p>}
+        </form>
+      </section>
+
+      {/* Dashboard Grid */}
+      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
+        
+        <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
+          <div className="flex items-center space-x-3 text-muted-foreground">
+            <ShieldAlert className="w-5 h-5 text-amber-500" />
+            <h3 className="font-semibold text-foreground">Pending Approvals</h3>
+          </div>
+          <div className="space-y-3">
+            {approvals.length === 0 ? (
+              <p className="text-sm text-muted-foreground italic">No pending actions require your approval.</p>
+            ) : (
+              approvals.map(app => (
+                <div key={app.approval_id} className="p-3 bg-background rounded-lg border border-border text-sm flex justify-between items-center cursor-pointer hover:border-primary transition-colors" onClick={() => router.push(`/workflow/${app.run_id}`)}>
+                  <div>
+                    <p className="font-medium truncate">{app.tool_name}</p>
+                    <p className="text-xs text-muted-foreground">Risk: {app.risk_level}</p>
+                  </div>
+                  <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
+          <div className="flex items-center space-x-3 text-muted-foreground">
+            <Activity className="w-5 h-5 text-blue-500" />
+            <h3 className="font-semibold text-foreground">Active Workflows</h3>
+          </div>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground italic">No active workflows running.</p>
+          </div>
+        </div>
+
+        <div className="bg-card border border-border rounded-2xl p-6 space-y-4">
+          <div className="flex items-center space-x-3 text-muted-foreground">
+            <Clock className="w-5 h-5 text-indigo-500" />
+            <h3 className="font-semibold text-foreground">Recent Runs</h3>
+          </div>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground italic">No recent run history.</p>
+          </div>
+        </div>
+
+      </section>
     </div>
   );
 }

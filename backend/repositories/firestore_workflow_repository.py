@@ -1,6 +1,9 @@
 from google.cloud import firestore
-from backend.models.schemas import WorkflowRun, Task, TaskStatus
+from backend.models.schemas import WorkflowRun, Task, TaskStatus, WorkflowEvent
 from backend.repositories.workflow_repository import WorkflowRepository
+from backend.models.security import ApprovalRequest
+from typing import AsyncGenerator
+import asyncio
 from backend.config.settings import settings
 import logging
 
@@ -109,3 +112,33 @@ class FirestoreWorkflowRepository(WorkflowRepository):
                 transaction.update(doc_ref, {"tasks": tasks})
                 
         _update(transaction, doc_ref)
+        
+    def save_event(self, event: WorkflowEvent) -> None:
+        # Save to events subcollection under the run document
+        events_ref = self.collection.document(event.run_id).collection("events")
+        events_ref.document(event.event_id).set(event.model_dump(mode='json'))
+        
+    async def stream_events(self, run_id: str) -> AsyncGenerator[WorkflowEvent, None]:
+        events_ref = self.collection.document(run_id).collection("events")
+        
+        # We need a queue to bridge the Firestore callback with the async generator
+        queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        
+        def on_snapshot(col_snapshot, changes, read_time):
+            for change in changes:
+                if change.type.name == 'ADDED':
+                    doc = change.document
+                    event = WorkflowEvent(**doc.to_dict())
+                    loop.call_soon_threadsafe(queue.put_nowait, event)
+                    
+        # Watch the query, maybe ordered by timestamp, though on_snapshot returns all initially
+        query = events_ref.order_by("timestamp")
+        watch = query.on_snapshot(on_snapshot)
+        
+        try:
+            while True:
+                event = await queue.get()
+                yield event
+        finally:
+            watch.unsubscribe()

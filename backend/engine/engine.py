@@ -3,7 +3,7 @@ import logging
 import random
 from typing import Optional
 from datetime import datetime, timezone
-from backend.models.schemas import Task, TaskStatus, ErrorType, TaskTriggerEvent
+from backend.models.schemas import Task, TaskStatus, ErrorType, TaskTriggerEvent, WorkflowEvent, WorkflowEventType
 from backend.repositories.workflow_repository import WorkflowRepository
 from backend.repositories.message_bus import MessageBus
 from backend.agents.orchestrator.orchestrator_agent import get_orchestrator_agent
@@ -22,6 +22,20 @@ class WorkflowEngine:
         self.repo = workflow_repo
         self.message_bus = message_bus
         self.agent_factory = agent_factory
+        
+    def _emit_event(self, event_type: str, run_id: str, workflow_id: str, task_id: Optional[str] = None, status: Optional[str] = None, summary: str = "", metadata: dict = None):
+        if metadata is None:
+            metadata = {}
+        event = WorkflowEvent(
+            type=event_type,
+            workflow_id=workflow_id,
+            run_id=run_id,
+            task_id=task_id,
+            status=status,
+            summary=summary,
+            sanitized_metadata=metadata
+        )
+        self.repo.save_event(event)
 
     async def evaluate_dag(self, run_id: str) -> None:
         """
@@ -90,8 +104,10 @@ class WorkflowEngine:
             any_failed = any(t.status in [TaskStatus.FAILED, TaskStatus.BLOCKED] for t in run.tasks)
             if any_failed:
                 run.status = TaskStatus.FAILED
+                self._emit_event(WorkflowEventType.WORKFLOW_FAILED, run_id, run.workflow_id, summary="Workflow failed")
             else:
                 run.status = TaskStatus.COMPLETED
+                self._emit_event(WorkflowEventType.WORKFLOW_COMPLETED, run_id, run.workflow_id, summary="Workflow completed")
             self.repo.save_run(run)
             logger.info(f"Run {run_id} marked as {run.status}")
 
@@ -132,6 +148,8 @@ class WorkflowEngine:
         # Fetch fresh task state after claim
         run = self.repo.get_run(run_id)
         task = next((t for t in run.tasks if t.task_id == task_id), None)
+        
+        self._emit_event(WorkflowEventType.TASK_STARTED, run_id, run.workflow_id, task_id, task.status, f"Task {task_id} started execution")
         
         try:
             # Execute with timeout
@@ -174,6 +192,7 @@ class WorkflowEngine:
             task.output_data = {"result": result}
             self.repo.update_task(run_id, task)
             logger.info(f"Task {task_id} completed successfully.")
+            self._emit_event(WorkflowEventType.TASK_COMPLETED, run_id, run.workflow_id, task_id, task.status, f"Task {task_id} completed")
             
             # Evaluate DAG for downstream tasks
             await self.evaluate_dag(run_id)
@@ -183,6 +202,7 @@ class WorkflowEngine:
             task.status = TaskStatus.WAITING_APPROVAL
             # Atomically save task status and approval request
             self.repo.update_task(run_id, task, pending_approval=e.pending_approval)
+            self._emit_event(WorkflowEventType.APPROVAL_REQUIRED, run_id, run.workflow_id, task_id, task.status, f"Task {task_id} requires approval")
             # Evaluate DAG is not needed because WAITING_APPROVAL just blocks downstream
         except asyncio.TimeoutError:
             logger.warning(f"Task {task_id} timed out after {task.timeout_seconds}s")
@@ -207,6 +227,7 @@ class WorkflowEngine:
             task.status = TaskStatus.FAILED
             task.completed_at = datetime.now(timezone.utc)
             self.repo.update_task(run_id, task)
+            self._emit_event(WorkflowEventType.TASK_FAILED, run_id, task.workflow_id, task.task_id, task.status, f"Task {task.task_id} failed", metadata={"error": error_msg, "error_type": error_type})
             asyncio.create_task(self.evaluate_dag(run_id))
             return
 
@@ -220,6 +241,7 @@ class WorkflowEngine:
                 
             self.repo.update_task(run_id, task)
             logger.info(f"Task {task.task_id} entered RECOVERING state. Attempt {task.recovery_attempts + 1}/{task.max_recoveries}")
+            self._emit_event(WorkflowEventType.TASK_RECOVERING, run_id, task.workflow_id, task.task_id, task.status, f"Task {task.task_id} recovering (attempt {task.recovery_attempts + 1})")
             
             async def trigger_recovery():
                 event = TaskRecoveryEvent(
@@ -238,6 +260,7 @@ class WorkflowEngine:
             self.repo.update_task(run_id, task)
             delay = self._calculate_backoff(task.attempt)
             logger.info(f"Task {task.task_id} will be retried in {delay:.2f}s")
+            self._emit_event(WorkflowEventType.TASK_RETRYING, run_id, task.workflow_id, task.task_id, task.status, f"Task {task.task_id} retrying in {delay:.1f}s")
             
             # Schedule retry asynchronously
             async def delayed_trigger():
@@ -254,6 +277,7 @@ class WorkflowEngine:
             task.status = TaskStatus.FAILED
             task.completed_at = datetime.now(timezone.utc)
             self.repo.update_task(run_id, task)
+            self._emit_event(WorkflowEventType.TASK_FAILED, run_id, task.workflow_id, task.task_id, task.status, f"Task {task.task_id} failed", metadata={"error": error_msg, "error_type": error_type})
             
             # This failure blocks downstream tasks, evaluate DAG
             asyncio.create_task(self.evaluate_dag(run_id))

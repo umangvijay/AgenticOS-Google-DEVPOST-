@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Any, Dict
 from datetime import datetime, timezone
 from enum import Enum
+import uuid
 
 class TaskStatus(str):
     PENDING = "PENDING"
@@ -104,3 +105,30 @@ class TaskRecoveryEvent(BaseModel):
     task_id: str
     recovery_attempt: int
     trace_id: Optional[str] = None
+
+class WorkflowEventType(str, Enum):
+    WORKFLOW_STARTED = "WORKFLOW_STARTED"
+    WORKFLOW_COMPLETED = "WORKFLOW_COMPLETED"
+    WORKFLOW_FAILED = "WORKFLOW_FAILED"
+    TASK_STARTED = "TASK_STARTED"
+    TASK_COMPLETED = "TASK_COMPLETED"
+    TASK_FAILED = "TASK_FAILED"
+    TASK_RETRYING = "TASK_RETRYING"
+    TASK_RECOVERING = "TASK_RECOVERING"
+    APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
+    APPROVAL_GRANTED = "APPROVAL_GRANTED"
+    APPROVAL_REJECTED = "APPROVAL_REJECTED"
+    TOOL_INVOKED = "TOOL_INVOKED"
+    TOOL_COMPLETED = "TOOL_COMPLETED"
+
+class WorkflowEvent(BaseModel):
+    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    type: str  # WorkflowEventType
+    workflow_id: str
+    run_id: str
+    task_id: Optional[str] = None
+    status: Optional[str] = None
+    summary: str
+    sanitized_metadata: Dict[str, Any] = Field(default_factory=dict)
+

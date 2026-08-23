@@ -1,0 +1,50 @@
+steps:
+  # 1. Build the API Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/api:${COMMIT_SHA}', '-f', 'Dockerfile.api', '.']
+
+  # 2. Build the Worker Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/worker:${COMMIT_SHA}', '-f', 'Dockerfile.worker', '.']
+
+  # 3. Push API Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/api:${COMMIT_SHA}']
+
+  # 4. Push Worker Image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/worker:${COMMIT_SHA}']
+
+  # 5. Deploy API to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'agenticos-api'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/api:${COMMIT_SHA}'
+      - '--region'
+      - '${_REGION}'
+      - '--quiet'
+
+  # 6. Deploy Worker to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'agenticos-worker'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/worker:${COMMIT_SHA}'
+      - '--region'
+      - '${_REGION}'
+      - '--quiet'
+
+substitutions:
+  _REGION: 'us-central1'
+  _REPO_NAME: 'agenticos-repo'
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/api:${COMMIT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/worker:${COMMIT_SHA}'

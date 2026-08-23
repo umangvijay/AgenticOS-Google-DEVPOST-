@@ -1,8 +1,11 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uuid
 import logging
+import asyncio
+import json
 from backend.models.schemas import WorkflowRun, Task, TaskStatus, WorkflowDefinition
 from backend.repositories.firestore_workflow_repository import FirestoreWorkflowRepository
 from backend.repositories.in_memory_message_bus import InMemoryMessageBus
@@ -11,6 +14,7 @@ from backend.agents.planner.planner_agent import get_planner_agent
 from backend.engine.dag_validator import validate_dag, DAGValidationError
 from backend.engine.engine import WorkflowEngine
 from backend.config.settings import settings
+from backend.api.dependencies.auth import get_current_user
 from google.adk.runners import InMemoryRunner
 import traceback
 
@@ -113,6 +117,16 @@ async def process_goal(request: GoalRequest):
             
         workflow_repo.save_run(run)
         
+        # Emit WORKFLOW_STARTED
+        from backend.models.schemas import WorkflowEvent, WorkflowEventType
+        start_event = WorkflowEvent(
+            type=WorkflowEventType.WORKFLOW_STARTED,
+            workflow_id=workflow_id,
+            run_id=run_id,
+            summary=f"Workflow started for goal: {request.goal}"
+        )
+        workflow_repo.save_event(start_event)
+        
         # 5. Evaluate DAG to trigger root tasks
         await workflow_engine.evaluate_dag(run_id)
         
@@ -128,10 +142,33 @@ async def process_goal(request: GoalRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/workflows/{run_id}")
-async def get_workflow(run_id: str):
+async def get_workflow(run_id: str, user_id: str = Depends(get_current_user)):
     if not workflow_repo:
         raise HTTPException(status_code=500, detail="Database not initialized")
     run = workflow_repo.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Workflow not found")
+    if run.user_id != user_id and run.user_id != "default_user":
+        raise HTTPException(status_code=403, detail="Access denied")
     return run
+
+@app.get("/api/v1/workflows/{run_id}/events")
+async def stream_workflow_events(run_id: str, request: Request, user_id: str = Depends(get_current_user)):
+    if not workflow_repo:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    run = workflow_repo.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if run.user_id != user_id and run.user_id != "default_user":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    async def event_generator():
+        try:
+            async for event in workflow_repo.stream_events(run_id):
+                if await request.is_disconnected():
+                    break
+                yield f"data: {event.model_dump_json()}\n\n"
+        except Exception as e:
+            logger.error(f"SSE stream error: {e}")
+            
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
