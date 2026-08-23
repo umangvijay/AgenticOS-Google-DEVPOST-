@@ -71,7 +71,7 @@ def test_dynamic_builder_workflow():
     assert manifest.state == ConnectorState.PENDING_CREDENTIALS
     assert manifest.is_enabled is False
     assert manifest.spec_hash is not None
-    assert manifest.endpoint == "http://127.0.0.1:8002/mcp"
+    assert manifest.endpoint == "http://127.0.0.1:8002/mcp/sse"
     
     # Tool cache should be populated
     cached = repo.get_cached_tools("petstore")

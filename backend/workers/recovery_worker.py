@@ -105,10 +105,15 @@ class RecoveryWorker:
                 task.status = TaskStatus.PENDING
                 self.repo.update_task(run.run_id, task)
                 
+                from backend.repositories.audit_repository import ActorType
                 audit_repo.log_event(AuditEvent(
                     event_type="TASK_RECOVERED",
-                    user_id=run.user_id,
+                    actor_id="SYSTEM",
+                    actor_type=ActorType.SYSTEM,
                     resource_id=task.task_id,
+                    workflow_id=run.workflow_id,
+                    run_id=run.run_id,
+                    task_id=task.task_id,
                     details={"attempt": task.recovery_attempts, "rationale": action.rationale}
                 ))
                 

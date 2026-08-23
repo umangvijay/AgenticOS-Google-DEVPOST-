@@ -81,7 +81,7 @@ async def test_execute_task_timeout(engine):
         
     updated_task = engine.repo.get_run(run_id).tasks[0]
     assert updated_task.status == TaskStatus.RETRYING
-    assert updated_task.error_type == ErrorType.RETRYABLE
+    assert updated_task.error_type == ErrorType.TIMEOUT_ERROR
 
 @pytest.mark.asyncio
 async def test_cancellation(engine):

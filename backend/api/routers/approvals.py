@@ -71,10 +71,15 @@ async def approve_request(
                 repo.update_task(run.run_id, t)
                 break
                 
+    from backend.repositories.audit_repository import ActorType
     audit_repo.log_event(AuditEvent(
         event_type="APPROVAL_GRANTED",
-        user_id=user_id,
+        actor_id=user_id,
+        actor_type=ActorType.USER,
         resource_id=approval_id,
+        workflow_id=approval.workflow_id,
+        run_id=approval.run_id,
+        task_id=approval.task_id,
         details={"workflow_id": approval.workflow_id, "task_id": approval.task_id}
     ))
                 
@@ -111,10 +116,15 @@ async def reject_request(
                 repo.update_task(run.run_id, t)
                 break
                 
+    from backend.repositories.audit_repository import ActorType
     audit_repo.log_event(AuditEvent(
         event_type="APPROVAL_REJECTED",
-        user_id=user_id,
+        actor_id=user_id,
+        actor_type=ActorType.USER,
         resource_id=approval_id,
+        workflow_id=approval.workflow_id,
+        run_id=approval.run_id,
+        task_id=approval.task_id,
         details={"workflow_id": approval.workflow_id, "task_id": approval.task_id}
     ))
                 

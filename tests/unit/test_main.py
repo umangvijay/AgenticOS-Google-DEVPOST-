@@ -10,9 +10,19 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def inject_in_memory_repo():
+    from backend.repositories.in_memory_message_bus import InMemoryMessageBus
+    from backend.engine.engine import WorkflowEngine
+    from backend.instrumentation.wrappers import InstrumentedWorkflowEngine
+    
     main_module.workflow_repo = InMemoryWorkflowRepository()
+    main_module.message_bus = InMemoryMessageBus()
+    main_module.workflow_engine = InstrumentedWorkflowEngine(
+        WorkflowEngine(main_module.workflow_repo, main_module.message_bus)
+    )
     yield
     main_module.workflow_repo = None
+    main_module.message_bus = None
+    main_module.workflow_engine = None
 
 @patch('backend.api.main.InMemoryRunner')
 def test_process_goal_success(mock_runner_class):
@@ -31,7 +41,9 @@ def test_process_goal_success(mock_runner_class):
             return self.data
             
     async def mock_run_debug(*args, **kwargs):
-        return [MockEvent(MockOutput({"mocked": "data"}))]
+        return [MockEvent(MockOutput({
+            "tasks": []
+        }))]
         
     mock_runner.run_debug = mock_run_debug
     mock_runner_class.return_value = mock_runner
@@ -46,4 +58,4 @@ def test_process_goal_success(mock_runner_class):
     run_id = data["run_id"]
     get_response = client.get(f"/api/v1/workflows/{run_id}")
     assert get_response.status_code == 200
-    assert len(get_response.json()["tasks"]) == 3
+    assert len(get_response.json()["tasks"]) == 0

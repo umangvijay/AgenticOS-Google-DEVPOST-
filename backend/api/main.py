@@ -49,7 +49,8 @@ async def startup_event():
     # We use InMemoryMessageBus for local development and deterministic tests as per the design
     # A real deployment would configure PubSubMessageBus
     message_bus = InMemoryMessageBus()
-    workflow_engine = WorkflowEngine(workflow_repo, message_bus)
+    from backend.instrumentation.wrappers import InstrumentedWorkflowEngine
+    workflow_engine = InstrumentedWorkflowEngine(WorkflowEngine(workflow_repo, message_bus))
     
     # In a real deployed app, the worker would be a separate process.
     # For Phase 2 local development simplicity with InMemoryMessageBus, we can start a background consumer

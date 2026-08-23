@@ -4,6 +4,7 @@ from typing import List, Optional
 from backend.models.plugin import PluginManifest, PluginRecord, PluginLifecycleState
 from backend.repositories.plugin_repository import PluginRepository
 from backend.services.runtime_snapshot import RuntimeSnapshotRegistry, PluginPolicy
+from backend.repositories.audit_repository import audit_repo, AuditEvent, ActorType
 
 class PluginValidator:
     def __init__(self, policy: PluginPolicy):
@@ -58,6 +59,14 @@ class PluginRegistryService:
             # 3. INSTALLED
             record.state = PluginLifecycleState.INSTALLED
             self.repository.save(record)
+            
+            audit_repo.log_event(AuditEvent(
+                event_type="PLUGIN_INSTALLED",
+                actor_id=user_id,
+                actor_type=ActorType.USER,
+                resource_id=record.id,
+                details={"plugin_name": manifest.name, "plugin_version": manifest.version}
+            ))
         except Exception as e:
             record.state = PluginLifecycleState.FAILED
             self.repository.save(record)
@@ -77,6 +86,14 @@ class PluginRegistryService:
         record.state = PluginLifecycleState.ENABLED
         self.repository.save(record)
         
+        audit_repo.log_event(AuditEvent(
+            event_type="PLUGIN_ENABLED",
+            actor_id=user_id,
+            actor_type=ActorType.USER,
+            resource_id=record.id,
+            details={"plugin_name": record.manifest.name}
+        ))
+        
         # Build new runtime snapshot atomically
         self._rebuild_snapshot()
 
@@ -90,6 +107,14 @@ class PluginRegistryService:
         
         record.state = PluginLifecycleState.DISABLED
         self.repository.save(record)
+        
+        audit_repo.log_event(AuditEvent(
+            event_type="PLUGIN_DISABLED",
+            actor_id=user_id,
+            actor_type=ActorType.USER,
+            resource_id=record.id,
+            details={"plugin_name": record.manifest.name}
+        ))
         
         # Build new runtime snapshot atomically
         self._rebuild_snapshot()

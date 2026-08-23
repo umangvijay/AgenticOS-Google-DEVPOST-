@@ -3,6 +3,8 @@ import logging
 from typing import Callable, Awaitable, Any
 from backend.models.schemas import TaskTriggerEvent
 from backend.repositories.message_bus import MessageBus, MessageContext
+from opentelemetry import propagate
+from opentelemetry import context as otel_context
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,17 @@ class InMemoryMessageBus(MessageBus):
 
     async def publish(self, topic: str, message: Any) -> None:
         queue = self._get_queue(topic)
-        await queue.put(message)
+        
+        # Inject OTel context
+        carrier = {}
+        propagate.inject(carrier)
+        
+        payload = {
+            "message": message,
+            "carrier": carrier
+        }
+        
+        await queue.put(payload)
         
         msg_id = getattr(message, "task_id", getattr(message, "schedule_id", str(message)))
         if isinstance(message, dict):
@@ -44,12 +56,22 @@ class InMemoryMessageBus(MessageBus):
         queue = self._get_queue(topic)
         message_counter = 0
         while True:
-            message = await queue.get()
+            payload = await queue.get()
+            message = payload["message"]
+            carrier = payload["carrier"]
+            
             message_counter += 1
-            ctx = InMemoryMessageContext(str(message_counter), queue, message)
+            ctx = InMemoryMessageContext(str(message_counter), queue, payload)
+            
+            # Extract OTel context and attach it
+            ctx_extracted = propagate.extract(carrier)
+            token = otel_context.attach(ctx_extracted)
+            
             try:
                 await handler(message, ctx)
             except Exception as e:
                 logger.error(f"Error in consumer handler: {e}")
                 # We implicitly NACK on unhandled exception in the handler framework if the handler didn't
                 await ctx.nack()
+            finally:
+                otel_context.detach(token)

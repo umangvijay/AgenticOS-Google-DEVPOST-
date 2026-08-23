@@ -47,7 +47,7 @@ class ApprovalsEngine:
         args_hash = ApprovalRequest.compute_arguments_hash(arguments)
         expires_at = datetime.now(timezone.utc) + timedelta(hours=24) # 24 hour expiry
         
-        return ApprovalRequest(
+        req = ApprovalRequest(
             approval_id=str(uuid.uuid4()),
             user_id=user_id,
             tool_name=tool_name,
@@ -63,10 +63,15 @@ class ApprovalsEngine:
             status=ApprovalStatus.PENDING
         )
         
+        from backend.repositories.audit_repository import ActorType
         audit_repo.log_event(AuditEvent(
             event_type="APPROVAL_REQUESTED",
-            user_id=user_id,
+            actor_id="SYSTEM",
+            actor_type=ActorType.SYSTEM,
             resource_id=req.approval_id,
+            workflow_id=workflow_id,
+            run_id=run_id,
+            task_id=task_id,
             details={
                 "tool_name": tool_name,
                 "risk_level": risk_level.name,
@@ -90,19 +95,28 @@ class ApprovalsEngine:
             raise ValueError("Approval has expired")
             
         # Exact-action binding verification
+        from backend.repositories.audit_repository import ActorType
         current_hash = ApprovalRequest.compute_arguments_hash(current_arguments)
         if current_hash != approval.arguments_hash:
             audit_repo.log_event(AuditEvent(
                 event_type="APPROVAL_VALIDATION_FAILED",
-                user_id=approval.user_id,
+                actor_id="SYSTEM",
+                actor_type=ActorType.SYSTEM,
                 resource_id=approval.approval_id,
+                workflow_id=approval.workflow_id,
+                run_id=approval.run_id,
+                task_id=approval.task_id,
                 details={"reason": "Arguments changed (TOCTOU violation)"}
             ))
             raise ValueError("Arguments have changed since approval was granted (TOCTOU violation)")
             
         audit_repo.log_event(AuditEvent(
             event_type="APPROVAL_VALIDATED",
-            user_id=approval.user_id,
+            actor_id="SYSTEM",
+            actor_type=ActorType.SYSTEM,
             resource_id=approval.approval_id,
+            workflow_id=approval.workflow_id,
+            run_id=approval.run_id,
+            task_id=approval.task_id,
             details={"task_id": approval.task_id}
         ))
