@@ -142,3 +142,50 @@ class FirestoreWorkflowRepository(WorkflowRepository):
                 yield event
         finally:
             watch.unsubscribe()
+
+    def create_if_absent(self, run: WorkflowRun) -> bool:
+        transaction = self.db.transaction()
+        doc_ref = self.collection.document(run.run_id)
+        
+        @firestore.transactional
+        def _create(transaction, doc_ref):
+            snapshot = doc_ref.get(transaction=transaction)
+            if snapshot.exists:
+                return False
+            transaction.set(doc_ref, run.model_dump(mode='json'))
+            return True
+            
+        return _create(transaction, doc_ref)
+
+    def get_approval(self, approval_id: str) -> ApprovalRequest | None:
+        doc = self.db.collection("approvals").document(approval_id).get()
+        if doc.exists:
+            return ApprovalRequest(**doc.to_dict())
+        return None
+
+    def list_pending_approvals(self, user_id: str) -> list[ApprovalRequest]:
+        from backend.models.security import ApprovalStatus
+        docs = self.db.collection("approvals").where(filter=firestore.FieldFilter("user_id", "==", user_id)).where(filter=firestore.FieldFilter("status", "==", ApprovalStatus.PENDING)).stream()
+        return [ApprovalRequest(**doc.to_dict()) for doc in docs]
+
+    def resolve_approval(self, approval_id: str, new_status: str, decision_by: str) -> bool:
+        from backend.models.security import ApprovalStatus
+        from datetime import datetime, timezone
+        transaction = self.db.transaction()
+        doc_ref = self.db.collection("approvals").document(approval_id)
+        
+        @firestore.transactional
+        def _resolve(transaction, doc_ref):
+            snapshot = doc_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                return False
+            data = snapshot.to_dict()
+            if data.get("status") != ApprovalStatus.PENDING:
+                return False
+            transaction.update(doc_ref, {
+                "status": new_status,
+                "decision_by": decision_by,
+                "decision_at": datetime.now(timezone.utc).isoformat()
+            })
+            return True
+        return _resolve(transaction, doc_ref)

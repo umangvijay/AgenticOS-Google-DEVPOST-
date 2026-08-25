@@ -2,8 +2,8 @@ import { Handle, Position } from "@xyflow/react";
 import { CheckCircle2, Clock, PlayCircle, AlertCircle, RefreshCw, XCircle, ShieldAlert } from "lucide-react";
 import clsx from "clsx";
 
-export default function DAGNode({ data }: { data: any }) {
-  const { label, status, type } = data;
+export default function DAGNode({ data }: { data: Record<string, unknown> }) {
+  const { label, status } = data;
 
   const getStatusConfig = () => {
     switch (status) {
@@ -36,11 +36,11 @@ export default function DAGNode({ data }: { data: any }) {
       
       <div className="flex items-center justify-between w-full space-x-2">
         <Icon className={clsx("w-5 h-5", config.color, config.animate)} />
-        <span className="text-sm font-semibold truncate flex-1 text-center">{label}</span>
+        <span className="text-sm font-semibold truncate flex-1 text-center">{String(label)}</span>
       </div>
       
       <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
-        {status}
+        {String(status)}
       </div>
 
       <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-muted-foreground" />

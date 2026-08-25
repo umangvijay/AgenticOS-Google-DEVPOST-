@@ -15,7 +15,7 @@ def get_intent_agent() -> LlmAgent:
         client_kwargs = {"api_key": settings.GEMINI_API_KEY}
     
     llm = Gemini(
-        name=settings.GEMINI_MODEL,
+        model=settings.GEMINI_MODEL,
         client_kwargs=client_kwargs
     )
     

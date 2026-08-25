@@ -1,8 +1,15 @@
 import asyncio
+import httpx
+import re
+import json
 import logging
 import random
-from typing import Optional
+import traceback
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
+
+from opentelemetry import trace
+from backend.observability.tracing import get_tracer
 from backend.models.schemas import Task, TaskStatus, ErrorType, TaskTriggerEvent, WorkflowEvent, WorkflowEventType
 from backend.repositories.workflow_repository import WorkflowRepository
 from backend.repositories.message_bus import MessageBus
@@ -16,12 +23,14 @@ from backend.models.schemas import TaskRecoveryEvent, SemanticErrorReason
 from backend.models.exceptions import SemanticException
 
 logger = logging.getLogger(__name__)
+tracer = get_tracer(__name__)
 
 class WorkflowEngine:
-    def __init__(self, workflow_repo: WorkflowRepository, message_bus: MessageBus, agent_factory: AgentFactory = None):
+    def __init__(self, workflow_repo: WorkflowRepository, message_bus: MessageBus, agent_factory: AgentFactory = None, memory_repo=None):
         self.repo = workflow_repo
         self.message_bus = message_bus
         self.agent_factory = agent_factory
+        self.memory_repo = memory_repo
         
     def _emit_event(self, event_type: str, run_id: str, workflow_id: str, task_id: Optional[str] = None, status: Optional[str] = None, summary: str = "", metadata: dict = None):
         if metadata is None:
@@ -53,6 +62,7 @@ class WorkflowEngine:
 
         completed_tasks = {t.task_id for t in run.tasks if t.status == TaskStatus.COMPLETED}
         failed_or_cancelled_tasks = {t.task_id for t in run.tasks if t.status in [TaskStatus.FAILED, TaskStatus.CANCELLED]}
+        skipped_tasks = {t.task_id for t in run.tasks if t.status == TaskStatus.SKIPPED}
         
         all_completed = True
         
@@ -61,9 +71,13 @@ class WorkflowEngine:
                 # Check dependencies
                 deps_met = True
                 deps_failed = False
+                deps_skipped = False
                 for dep in task.dependencies:
                     if dep in failed_or_cancelled_tasks:
                         deps_failed = True
+                        break
+                    if dep in skipped_tasks:
+                        deps_skipped = True
                         break
                     if dep not in completed_tasks:
                         deps_met = False
@@ -74,6 +88,10 @@ class WorkflowEngine:
                     self.repo.update_task(run_id, task)
                     logger.info(f"Task {task.task_id} BLOCKED due to failed dependencies")
                     # Note: we do not set all_completed = False because BLOCKED is a terminal state
+                elif deps_skipped:
+                    task.status = TaskStatus.SKIPPED
+                    self.repo.update_task(run_id, task)
+                    logger.info(f"Task {task.task_id} SKIPPED due to skipped dependencies")
                 elif deps_met:
                     # It's ready, but we keep it PENDING until a worker claims it.
                     # WAITING -> PENDING if it was WAITING
@@ -96,7 +114,7 @@ class WorkflowEngine:
                         task.status = TaskStatus.WAITING
                         self.repo.update_task(run_id, task)
                     all_completed = False
-            elif task.status not in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.BLOCKED]:
+            elif task.status not in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.BLOCKED, TaskStatus.SKIPPED]:
                 all_completed = False
 
         if all_completed and run.status not in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
@@ -152,50 +170,147 @@ class WorkflowEngine:
         self._emit_event(WorkflowEventType.TASK_STARTED, run_id, run.workflow_id, task_id, task.status, f"Task {task_id} started execution")
         
         try:
-            # Execute with timeout
-            async def _run_agent():
-                # Get the pinned snapshot version from the run if it exists, otherwise use latest
-                # (For simplicity we assume run.snapshot_version exists or we use latest and pin it)
-                snapshot_version = getattr(run, 'snapshot_version', None)
+            with tracer.start_as_current_span(f"task:{task.task_id}") as span:
+                span.set_attribute("workflow.id", run.workflow_id)
+                span.set_attribute("task.agent", task.agent)
+                span.set_attribute("task.tool", str(task.tool))
+
+                # 1. Variable Interpolation Pipeline
+                def interpolate(val):
+                    if isinstance(val, dict):
+                        return {k: interpolate(v) for k, v in val.items()}
+                    elif isinstance(val, list):
+                        return [interpolate(v) for v in val]
+                    elif isinstance(val, str):
+                        pattern = r"\{\{\s*(.*?)\s*\}\}"
+                        def replacer(match):
+                            expr = match.group(1)
+                            parts = expr.split('.')
+                            if len(parts) >= 3 and parts[0] == 'tasks':
+                                target_task_id = parts[1]
+                                target_task = next((t for t in run.tasks if t.task_id == target_task_id), None)
+                                if target_task and target_task.output_data:
+                                    curr = target_task.output_data
+                                    start_idx = 3 if parts[2] == 'output' else 2
+                                    for p in parts[start_idx:]:
+                                        if isinstance(curr, dict) and p in curr:
+                                            curr = curr[p]
+                                        else:
+                                            return ""
+                                    return str(curr) if not isinstance(curr, (dict, list)) else json.dumps(curr)
+                            return match.group(0)
+                        return re.sub(pattern, replacer, val)
+                    return val
                 
-                # If a specific agent_id is requested, build it from the factory
-                agent_id = getattr(task, 'agent_id', None)
-                if agent_id and self.agent_factory:
-                    context = {
-                        "run_id": run_id,
-                        "task_id": task_id,
-                        "workflow_id": run.workflow_id,
-                        "user_id": run.user_id
-                    }
-                    
-                    approved_req_id = task.input_data.get("_approved_request_id")
-                    if approved_req_id:
-                        context["approved_request"] = self.repo.get_approval(approved_req_id)
+                interpolated_input = interpolate(task.input_data)
+                
+                # 2. Hybrid Execution: Core Deterministic Nodes
+                if task.agent.startswith("core."):
+                    async def _run_core():
+                        if task.agent == "core.http":
+                            url = interpolated_input.get("url", "")
+                            method = interpolated_input.get("method", "GET").upper()
+                            headers = interpolated_input.get("headers", {})
+                            body = interpolated_input.get("body", None)
+                            async with httpx.AsyncClient() as client:
+                                req_kwargs = {"headers": headers}
+                                if body and method in ["POST", "PUT", "PATCH"]:
+                                    req_kwargs["json"] = body if isinstance(body, dict) else json.loads(body)
+                                resp = await client.request(method, url, **req_kwargs)
+                                try:
+                                    return resp.json()
+                                except:
+                                    return {"text": resp.text, "status": resp.status_code}
+                        elif task.agent == "core.set":
+                            return interpolated_input.get("fields", {})
+                        elif task.agent == "core.if":
+                            condition = str(interpolated_input.get("condition", "False"))
+                            # Safe boolean evaluation for demo
+                            is_true = condition.lower() in ['true', '1', 'yes']
+                            if not is_true:
+                                task.status = TaskStatus.SKIPPED
+                            return {"matched": is_true}
+                        return {"error": f"Unknown core node: {task.agent}"}
                         
-                    # In a real implementation we would fetch the pinned snapshot from the factory
-                    agent = self.agent_factory.build_agent(agent_id, context=context)
-                    if not agent:
-                        raise ValueError(f"Plugin agent {agent_id} could not be resolved.")
+                    result = await asyncio.wait_for(_run_core(), timeout=task.timeout_seconds)
                 else:
-                    # Fallback to Phase 2 default OrchestratorAgent
-                    agent = get_orchestrator_agent()
-                    
-                runner = InMemoryRunner(agent=agent, app_name=settings.APP_NAME)
-                # In real app, we pass task.input_data
-                events = await runner.run_debug(f"Execute step: {task.task_id}")
-                return str(events[-1].output) if events else ""
                 
-            result = await asyncio.wait_for(_run_agent(), timeout=task.timeout_seconds)
-            
-            task.status = TaskStatus.COMPLETED
-            task.completed_at = datetime.now(timezone.utc)
-            task.output_data = {"result": result}
-            self.repo.update_task(run_id, task)
-            logger.info(f"Task {task_id} completed successfully.")
-            self._emit_event(WorkflowEventType.TASK_COMPLETED, run_id, run.workflow_id, task_id, task.status, f"Task {task_id} completed")
-            
-            # Evaluate DAG for downstream tasks
-            await self.evaluate_dag(run_id)
+                # Execute AI Agent with timeout
+                    async def _run_agent():
+                    # Get the pinned snapshot version from the run if it exists, otherwise use latest
+                    snapshot_version = getattr(run, 'snapshot_version', None)
+                    
+                    # If a specific agent_id is requested, build it from the factory
+                    agent_id = getattr(task, 'agent_id', None)
+                    if agent_id and self.agent_factory:
+                        context = {
+                            "run_id": run_id,
+                            "task_id": task_id,
+                            "workflow_id": run.workflow_id,
+                            "user_id": run.user_id
+                        }
+                        
+                        approved_req_id = task.input_data.get("_approved_request_id")
+                        if approved_req_id:
+                            context["approved_request"] = self.repo.get_approval(approved_req_id)
+                            
+                        agent = self.agent_factory.build_agent(agent_id, context=context)
+                        if not agent:
+                            raise ValueError(f"Plugin agent {agent_id} could not be resolved.")
+                    else:
+                        # Fallback to Phase 2 default OrchestratorAgent
+                        import json
+                        from backend.services.embedding_service import GoogleCloudEmbeddingService
+                        from backend.agents.context_manager import context_manager
+                        
+                        tool_router = self.agent_factory.tool_router if self.agent_factory else None
+                        catalog = await tool_router.get_tool_catalog() if tool_router else []
+                        catalog_json = json.dumps(catalog)
+                        
+                        # 1. Build sliding window context
+                        prev_tasks = [t.model_dump(mode="json") for t in run.tasks if t.status in [TaskStatus.COMPLETED, TaskStatus.FAILED] and t.task_id != task.task_id]
+                        ctx_data = context_manager.build_context(prev_tasks)
+                        workflow_context_str = f"Summary of older tasks:\n{ctx_data['older_summary']}\n\nRecent tasks:\n{json.dumps(ctx_data['recent_tasks'], indent=2)}"
+                        
+                        agent = get_orchestrator_agent(
+                            tool_router=tool_router,
+                            catalog_json=catalog_json,
+                            memory_repo=self.memory_repo,
+                            embedding_service=GoogleCloudEmbeddingService(),
+                            user_id=run.user_id,
+                            workflow_context=workflow_context_str
+                        )
+                        
+                    runner = InMemoryRunner(agent=agent, app_name=settings.APP_NAME)
+                    # In real app, we pass task.input_data
+                    events = await runner.run_debug(f"Execute step: {task.task_id}")
+                    # Helper: extract text from ADK Event
+                    def extract_event_text(events):
+                        for event in reversed(events):
+                            if getattr(event, 'output', None) is not None:
+                                if hasattr(event.output, 'model_dump'):
+                                    return event.output.model_dump()
+                                return event.output
+                            if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
+                                for part in event.content.parts:
+                                    if hasattr(part, 'text') and part.text:
+                                        return part.text
+                        return ""
+                    
+                    return str(extract_event_text(events))
+                    
+                    result = await asyncio.wait_for(_run_agent(), timeout=task.timeout_seconds)
+                span.set_attribute("task.status", "COMPLETED")
+                
+                task.status = TaskStatus.COMPLETED
+                task.completed_at = datetime.now(timezone.utc)
+                task.output_data = {"result": result}
+                self.repo.update_task(run_id, task)
+                logger.info(f"Task {task_id} completed successfully.")
+                self._emit_event(WorkflowEventType.TASK_COMPLETED, run_id, run.workflow_id, task_id, task.status, f"Task {task_id} completed")
+                
+                # Evaluate DAG for downstream tasks
+                await self.evaluate_dag(run_id)
             
         except ApprovalRequiredException as e:
             logger.info(f"Task {task_id} requires human approval: {e.pending_approval.approval_id}")

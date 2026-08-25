@@ -1,0 +1,11 @@
+.venv
+__pycache__
+*.pyc
+.env
+.env.local
+.git
+.pytest_cache
+node_modules
+frontend/.next
+frontend/node_modules
+sandbox_security_audit.log

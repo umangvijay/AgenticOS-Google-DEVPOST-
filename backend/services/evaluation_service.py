@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 from datetime import datetime, timezone
 from backend.models.schemas import WorkflowRun, TaskStatus
 from backend.models.evaluation import AgentEvaluationRecord
+from backend.config.settings import settings
 import logging
 
 logger = logging.getLogger("evaluation_service")
@@ -56,7 +57,7 @@ class EvaluationService:
             run_id=run.run_id,
             workflow_id=run.workflow_id,
             agent_name="orchestrator", # Default, could be extracted per task
-            model="gemini-1.5-pro", # Should be dynamically pulled from traces
+            model=settings.GEMINI_MODEL,
             task_type="workflow",
             success=success,
             recovery_attempts=total_recovery_attempts,

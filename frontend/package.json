@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
+    "@react-oauth/google": "^0.13.5",
     "@types/dagre": "^0.7.54",
     "@xyflow/react": "^12.11.3",
     "clsx": "^2.1.1",

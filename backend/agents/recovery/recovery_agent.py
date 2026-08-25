@@ -18,7 +18,7 @@ def get_recovery_agent() -> LlmAgent:
         client_kwargs = {"api_key": settings.GEMINI_API_KEY}
         
     llm = Gemini(
-        model_name=settings.GEMINI_MODEL,
+        model=settings.GEMINI_MODEL,
         client_kwargs=client_kwargs
     )
     
@@ -47,7 +47,7 @@ def get_recovery_agent() -> LlmAgent:
         name="RecoveryAgent",
         instruction=instruction,
         model=llm,
-        response_model=RecoveryAction
+        output_schema=RecoveryAction
     )
     
     return agent

@@ -15,12 +15,16 @@ logger = logging.getLogger(__name__)
 # We'll assume they can be fetched similarly to other endpoints.
 # For simplicity, we define a stub getter.
 def get_workflow_repo() -> WorkflowRepository:
-    from backend.repositories.workflow_repository import InMemoryWorkflowRepository
-    # Typically this would return a singleton from app state
-    raise NotImplementedError("Dependency injection missing for repo")
+    import backend.api.main as main
+    if not main.workflow_repo:
+        raise HTTPException(status_code=500, detail="Repository not initialized")
+    return main.workflow_repo
 
 def get_message_bus() -> MessageBus:
-    raise NotImplementedError("Dependency injection missing for message bus")
+    import backend.api.main as main
+    if not main.message_bus:
+        raise HTTPException(status_code=500, detail="Message bus not initialized")
+    return main.message_bus
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
 

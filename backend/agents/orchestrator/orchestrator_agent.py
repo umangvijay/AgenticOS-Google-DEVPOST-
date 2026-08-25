@@ -10,7 +10,7 @@ from backend.services.ats_analyzer_service import ATSAnalyzerService
 from backend.services.resume_tailor_service import ResumeTailorService
 from backend.services.resume_renderer import ResumeRendererService
 
-def get_orchestrator_agent(tool_router=None, catalog_json: str = "[]", memory_repo: MemoryRepository = None, embedding_service: EmbeddingService = None, user_id: str = "default_user") -> LlmAgent:
+def get_orchestrator_agent(tool_router=None, catalog_json: str = "[]", memory_repo: MemoryRepository = None, embedding_service: EmbeddingService = None, user_id: str = "default_user", workflow_context: str = "") -> LlmAgent:
     client_kwargs = {}
     if not settings.GEMINI_API_KEY:
         client_kwargs = {
@@ -22,8 +22,9 @@ def get_orchestrator_agent(tool_router=None, catalog_json: str = "[]", memory_re
         client_kwargs = {"api_key": settings.GEMINI_API_KEY}
     
     llm = Gemini(
-        model_name=settings.GEMINI_MODEL,
-        client_kwargs=client_kwargs
+        model=settings.GEMINI_MODEL,
+        client_kwargs=client_kwargs,
+        tools=[{"google_search": {}}]
     )
     
     async def call_external_tool(agent_tool_name: str, arguments_json: str) -> str:
@@ -36,11 +37,14 @@ def get_orchestrator_agent(tool_router=None, catalog_json: str = "[]", memory_re
             return "Error: ToolRouter not initialized."
         try:
             args = json.loads(arguments_json)
-            result = await tool_router.execute_tool(agent_tool_name, args)
+            # We need to extract context from somewhere, or accept it as an argument
+            # In Phase 2, the context is usually bound to the agent instance
+            # We'll pass an empty context for now or a dummy context, but wait, we need real task_ids.
+            # Let's see if we can get the context that the engine passed to the agent.
+            # Actually, we can just let execute_tool_safe handle an empty context if it's not provided.
+            result = await tool_router.execute_tool_safe(agent_tool_name, args, context={"user_id": user_id})
             return str(result)
         except Exception as e:
-            # We return the error as a string so the LLM can see it and retry if needed
-            # But the WorkflowEngine Phase 2 will also catch exceptions if they bubble up.
             # To bubble up retries/failures to Phase 2 workflow engine, we MUST raise it!
             raise e
 
@@ -121,6 +125,9 @@ Only use tools from the catalog. Do not attempt to guess URLs or use tools not i
 If you need to retrieve or store long-term semantic context, use the `search_memory` and `store_memory` tools.
 If you need to work with resumes, you can `analyze_resume_ats` and `tailor_resume`.
 If a tool fails, it will raise an error which the workflow engine will handle (checkpoints, retries).
+
+Workflow History Context:
+{workflow_context}
 """
     
     agent_tools = [call_external_tool, analyze_resume_ats, tailor_resume]

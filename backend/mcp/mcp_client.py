@@ -11,8 +11,8 @@ class MCPClientManager:
     """Manages MCP Client connections utilizing the official python SDK."""
 
     @classmethod
-    def get_auth_headers(cls, manifest: MCPManifest) -> Dict[str, str]:
-        headers = {}
+    def get_auth_headers(cls, manifest: MCPManifest, extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        headers = extra_headers or {}
         if manifest.auth.type == AuthType.API_KEY and manifest.auth.credential_ref:
             # In Phase 3, credential_ref acts as an identifier to fetch the secret from Secret Manager
             # We mock the Secret Manager resolution here
@@ -84,10 +84,10 @@ class MCPClientManager:
         return cached_tools
 
     @classmethod
-    async def call_tool(cls, manifest: MCPManifest, tool_name: str, arguments: Dict[str, Any]) -> Any:
+    async def call_tool(cls, manifest: MCPManifest, tool_name: str, arguments: Dict[str, Any], extra_headers: Optional[Dict[str, str]] = None) -> Any:
         """Connect to MCP, initialize, and call a tool."""
         if manifest.transport == MCPTransportType.STREAMABLE_HTTP:
-            headers = cls.get_auth_headers(manifest)
+            headers = cls.get_auth_headers(manifest, extra_headers)
             import httpx2
             client = httpx2.AsyncClient(headers=headers)
             async with streamable_http_client(manifest.endpoint, http_client=client) as streams:

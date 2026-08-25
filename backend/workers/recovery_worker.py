@@ -73,7 +73,8 @@ class RecoveryWorker:
             elif isinstance(raw_output, RecoveryAction):
                 action = raw_output
             else:
-                action = RecoveryAction.model_validate(raw_output)
+                data = raw_output.model_dump() if hasattr(raw_output, 'model_dump') else raw_output
+                action = RecoveryAction.model_validate(data)
                 
             # 3. Process RecoveryAction
             if action.action == RecoveryActionEnum.ABORT:

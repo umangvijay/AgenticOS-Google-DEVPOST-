@@ -2,8 +2,7 @@
 
 import { WorkflowEvent } from "@/lib/api";
 import { format } from "date-fns";
-import { CheckCircle2, Clock, PlayCircle, AlertCircle, RefreshCw, XCircle, ShieldAlert } from "lucide-react";
-import clsx from "clsx";
+import { CheckCircle2, PlayCircle, AlertCircle, RefreshCw, XCircle, ShieldAlert } from "lucide-react";
 
 export default function ExecutionTimeline({ events }: { events: WorkflowEvent[] }) {
   const getIcon = (type: string) => {

@@ -4,6 +4,22 @@ from datetime import datetime, timezone
 from enum import Enum
 import uuid
 
+class GeminiCompatibleBaseModel(BaseModel):
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler):
+        json_schema = handler(core_schema)
+        json_schema = handler.resolve_ref_schema(json_schema)
+        def clean(d):
+            if isinstance(d, dict):
+                d.pop("additionalProperties", None)
+                for k, v in list(d.items()):
+                    clean(v)
+            elif isinstance(d, list):
+                for item in d:
+                    clean(item)
+            return d
+        return clean(json_schema)
+
 class TaskStatus(str):
     PENDING = "PENDING"
     WAITING = "WAITING"
@@ -15,6 +31,7 @@ class TaskStatus(str):
     BLOCKED = "BLOCKED"
     WAITING_APPROVAL = "WAITING_APPROVAL"
     RECOVERING = "RECOVERING"
+    SKIPPED = "SKIPPED"
 
 class ErrorType(str, Enum):
     SEMANTIC_ERROR = "SEMANTIC_ERROR"
@@ -34,7 +51,7 @@ class SemanticErrorReason(str, Enum):
     INVALID_PARAMETER_FORMAT = "INVALID_PARAMETER_FORMAT"
     TOOL_SEMANTIC_REJECTION = "TOOL_SEMANTIC_REJECTION"
 
-class TaskDefinition(BaseModel):
+class TaskDefinition(GeminiCompatibleBaseModel):
     task_id: str = Field(description="Unique identifier for the task within the workflow")
     agent: str = Field(description="The agent to handle the task")
     tool: Optional[str] = Field(None, description="The tool to execute, if any")
@@ -43,7 +60,7 @@ class TaskDefinition(BaseModel):
     timeout_seconds: int = Field(60, description="Execution timeout in seconds")
     max_retries: int = Field(3, description="Maximum number of retry attempts")
 
-class WorkflowDefinition(BaseModel):
+class WorkflowDefinition(GeminiCompatibleBaseModel):
     tasks: List[TaskDefinition] = Field(description="The list of tasks in the workflow")
 
 class Task(BaseModel):
@@ -88,7 +105,7 @@ class WorkflowRun(BaseModel):
     tasks: List[Task] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-class IntentSchema(BaseModel):
+class IntentSchema(GeminiCompatibleBaseModel):
     action: str = Field(description="The core action the user wants to perform")
     target: str = Field(description="The target of the action")
     context: Optional[str] = Field(None, description="Any additional context provided")

@@ -19,3 +19,23 @@ __pycache__/
 # Node
 node_modules/
 .next/
+
+# Security keys
+backend/security/keys/*.pem
+
+# Local database
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Local logs
+*.log
+
+# macOS
+.DS_Store
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl

@@ -5,6 +5,8 @@ from backend.mcp.tool_policy import ToolPolicy
 from backend.mcp.mcp_client import MCPClientManager
 from backend.services.approvals_engine import ApprovalsEngine, ApprovalRequiredException
 from backend.models.security import AutonomyLevel
+from backend.mcp.circuit_breaker import circuit_breaker
+from backend.engine.idempotency_guard import IdempotencyGuard
 
 logger = logging.getLogger(__name__)
 
@@ -12,10 +14,11 @@ class ToolRouterError(Exception):
     pass
 
 class ToolRouter:
-    def __init__(self, mcp_repo: MCPRepository, policy: ToolPolicy, approvals_engine: Optional[ApprovalsEngine] = None):
+    def __init__(self, mcp_repo: MCPRepository, policy: ToolPolicy, approvals_engine: Optional[ApprovalsEngine] = None, idempotency_repo=None):
         self.mcp_repo = mcp_repo
         self.policy = policy
         self.approvals_engine = approvals_engine
+        self.idempotency_guard = IdempotencyGuard(idempotency_repo) if idempotency_repo else None
 
     async def get_tool_catalog(self) -> List[Dict[str, Any]]:
         """Returns the list of tools that the agent is allowed to use."""
@@ -90,8 +93,61 @@ class ToolRouter:
         # 4. Execute via MCP Client
         try:
             logger.info(f"ToolRouter executing {tool_name} on {mcp_id}")
-            result = await MCPClientManager.call_tool(mcp, tool_name, arguments)
+            
+            # Inject trace context
+            from opentelemetry.propagate import inject
+            trace_headers = {}
+            inject(trace_headers)
+            
+            result = await MCPClientManager.call_tool(mcp, tool_name, arguments, extra_headers=trace_headers)
             return result
         except Exception as e:
             logger.error(f"MCP execution failed: {e}")
             raise ToolRouterError(f"MCP execution failed: {e}")
+
+    async def execute_tool_safe(self, agent_tool_name: str, arguments: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Any:
+        """
+        Safe execution wrapper that integrates the Circuit Breaker and Idempotency Guard.
+        """
+        if "__" not in agent_tool_name:
+            raise ToolRouterError(f"Invalid tool name format: {agent_tool_name}")
+            
+        mcp_id, tool_name = agent_tool_name.split("__", 1)
+        
+        # 1. Circuit Breaker Check
+        if circuit_breaker.get_status(mcp_id) == "OPEN":
+            raise ToolRouterError("BLOCKED_UPSTREAM_OUTAGE")
+
+        async def _execute():
+            # Perform actual execution logic including approvals
+            return await self.execute_tool(agent_tool_name, arguments, context)
+
+        # 2. Idempotency Check & Execution
+        workflow_id = context.get("workflow_id", "unknown") if context else "unknown"
+        task_id = context.get("task_id", "unknown") if context else "unknown"
+
+        try:
+            if self.idempotency_guard and workflow_id != "unknown" and task_id != "unknown":
+                result = await self.idempotency_guard.execute_once(
+                    workflow_id=workflow_id,
+                    task_id=task_id,
+                    tool_name=agent_tool_name,
+                    arguments=arguments,
+                    execute_fn=_execute
+                )
+                
+                if result.blocked:
+                    raise ToolRouterError(f"Idempotency blocked execution: {result.reason}")
+                
+                output = result.result
+            else:
+                # Fallback if no idempotency repo or context
+                output = await _execute()
+
+            # 3. Record success to circuit breaker
+            circuit_breaker.record_success(mcp_id)
+            return output
+        except Exception as e:
+            circuit_breaker.record_failure(mcp_id)
+            raise
+

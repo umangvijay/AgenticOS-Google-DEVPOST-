@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ReactFlow, Node, Edge, Background, Controls } from "@xyflow/react";
 import '@xyflow/react/dist/style.css';
 
-import { getWorkflow, subscribeWorkflowEvents, WorkflowRun, WorkflowEvent, Task, listApprovals, ApprovalRequest, resolveApproval } from "@/lib/api";
+import { getWorkflow, subscribeWorkflowEvents, WorkflowRun, WorkflowEvent, listApprovals, ApprovalRequest, resolveApproval } from "@/lib/api";
 import DAGNode from "@/components/DAGNode";
 import { getLayoutedElements } from "@/components/DAGLayout";
 import ExecutionTimeline from "@/components/ExecutionTimeline";
@@ -44,8 +44,9 @@ export default function WorkflowExecutionPage() {
       
       setError("");
       return data;
-    } catch (err: any) {
-      setError(err.message || "Failed to load workflow state");
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to load workflow state";
+      setError(errorMessage);
       return null;
     } finally {
       setLoading(false);
@@ -70,7 +71,8 @@ export default function WorkflowExecutionPage() {
           }
         },
         () => setReconnecting(false),
-        (err) => {
+        (err: unknown) => {
+          console.error(err);
           setReconnecting(true);
         }
       );
@@ -106,8 +108,10 @@ export default function WorkflowExecutionPage() {
     });
 
     const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(initialNodes, initialEdges);
-    setNodes(layoutedNodes);
-    setEdges(layoutedEdges);
+    setTimeout(() => {
+      setNodes(layoutedNodes);
+      setEdges(layoutedEdges);
+    }, 0);
   }, [workflow]);
 
   const handleNodeClick = (event: React.MouseEvent, node: Node) => {
