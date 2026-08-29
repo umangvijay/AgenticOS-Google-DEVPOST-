@@ -273,11 +273,10 @@ export default function SettingsPage() {
                 value={settings?.default_model || "gemini-3.7-flash"}
                 onChange={e => setSettings(s => s ? {...s, default_model: e.target.value} : s)}
               >
-                <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
-                <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
                 <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
+                <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
                 <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite</option>
-                <option value="gemini-3.6-flash-lite">Gemini 3.6 Flash-Lite</option>
               </select>
             </div>
           </div>
