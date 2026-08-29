@@ -1,5 +1,4 @@
 import io
-from weasyprint import HTML
 from backend.models.resume import Resume
 
 class ResumeRendererService:
@@ -92,11 +91,9 @@ class ResumeRendererService:
     def render_pdf(self, resume: Resume) -> bytes:
         """Renders a Resume object to a PDF byte string via WeasyPrint."""
         html_string = self._generate_html(resume)
-        
-        # Create a PDF buffer
+        from weasyprint import HTML
+
         pdf_buffer = io.BytesIO()
-        
-        # Render HTML to PDF
         HTML(string=html_string).write_pdf(pdf_buffer)
         
         pdf_bytes = pdf_buffer.getvalue()

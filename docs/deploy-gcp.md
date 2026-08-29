@@ -103,35 +103,77 @@ Use `STORAGE_BACKEND=firestore` in the next step. Firestore is billed (usually s
 
 ---
 
-## 6. Deploy the API (Cloud Run, scale to zero)
+## 6. Deploy the API (Cloud Run) — use this if Console failed
 
-From the **repo root**:
+Why deploys fail: Cloud Console looks for a root **`Dockerfile`** (this repo used to only have `Dockerfile.api`); Playwright Chromium made Cloud Build time out; `pip --no-deps` missed packages; WeasyPrint needed OS libraries; **Firestore before a database exists** crashes the new revision; the local folder `AgenticOS(Google DEVPOST)` has parentheses that break some uploads. First deploy now uses **SQLite** so the service actually starts.
+
+### Cloud Shell (recommended)
+
+Open [shell.cloud.google.com](https://shell.cloud.google.com) **in the project that has billing**. Do **not** upload the Mac folder with parentheses. Clone GitHub:
 
 ```bash
-cd "/path/to/AgenticOS(Google DEVPOST)"
+export PROJECT_ID=YOUR_PROJECT_ID
+gcloud config set project "$PROJECT_ID"
+
+git clone https://github.com/umangvijay/AgenticOS-Google-DEVPOST-.git
+cd AgenticOS-Google-DEVPOST-
+
+bash scripts/gcp/deploy-api-cloudshell.sh
+```
+
+Or the equivalent after `gcloud config set project`:
+
+```bash
+gcloud config set builds/timeout 1800
 
 gcloud run deploy agentos-api \
   --source . \
-  --dockerfile Dockerfile.api \
   --region us-central1 \
   --allow-unauthenticated \
   --min-instances 0 \
   --max-instances 4 \
-  --memory 2Gi \
-  --cpu 2 \
+  --memory 1Gi \
+  --cpu 1 \
   --timeout 300 \
-  --set-env-vars "STORAGE_BACKEND=firestore,APP_ENV=production,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,GOOGLE_CLOUD_REGION=us-central1,GEMINI_MODEL=gemini-2.5-flash,CONTACT_TO_EMAIL=godumang35@gmail.com,CONTACT_SMTP_HOST=smtp.gmail.com,CONTACT_SMTP_PORT=587,CONTACT_SMTP_USERNAME=godumang35@gmail.com" \
-  --set-secrets "SECRETS_MASTER_KEY=secrets-master-key:latest" \
-  --project=YOUR_PROJECT_ID
+  --set-env-vars "APP_ENV=production,STORAGE_BACKEND=sqlite,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=us-central1,GEMINI_MODEL=gemini-2.5-flash"
 ```
 
-If you created `contact-smtp-password`, add it to `--set-secrets` as `CONTACT_SMTP_PASSWORD=contact-smtp-password:latest`.
+There is a root `Dockerfile`. You do **not** need `--dockerfile Dockerfile.api`.
 
-Copy the service URL, e.g. `https://agentos-api-xxxxx-uc.a.run.app`.
+### Cloud Console (manual)
 
-**Do not** pass `GEMINI_API_KEY`. Vertex uses the service account from step 3.
+1. [Cloud Run](https://console.cloud.google.com/run) → **Create service**.
+2. **Continuously deploy from a repository** (GitHub: `umangvijay/AgenticOS-Google-DEVPOST-`) **or** deploy from Cloud Shell source (the clone above).
+3. Build type: **Dockerfile**. Path: **`Dockerfile`** at the repo root.
+4. Region `us-central1`. Allow unauthenticated. Memory **1 GiB**. Request timeout 300s. Container port **8080**.
+5. Variables: `APP_ENV=production`, `STORAGE_BACKEND=sqlite`, `GOOGLE_CLOUD_PROJECT=<id>`, `GOOGLE_CLOUD_REGION=us-central1`. Do **not** set `GEMINI_API_KEY`.
 
-Health check: `curl https://YOUR-API-URL/health` — expect `"status":"healthy"`.
+Wait until the revision is **green**, then:
+
+```bash
+curl -sS "$(gcloud run services describe agentos-api --region us-central1 --format='value(status.url)')/health"
+```
+
+Expect `"status":"healthy"` and `"storage":"sqlite"`. After that, create Firestore and switch `STORAGE_BACKEND=firestore` (step 5). Optional: `--set-secrets SECRETS_MASTER_KEY=secrets-master-key:latest`.
+
+Grant Vertex to the runtime SA:
+
+```bash
+PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+```
+
+### If it still fails
+
+| Symptom | Fix |
+| --- | --- |
+| Build timeout / Playwright / Chromium | This Dockerfile no longer installs browsers. Pull latest `main` and redeploy. |
+| `unrecognized arguments: --dockerfile` | Old `gcloud`. Use root `Dockerfile` and omit `--dockerfile`. |
+| Revision not ready / container failed | Cloud Run → service → **Logs**. Often Firestore with no database — keep `STORAGE_BACKEND=sqlite` first. |
+| APIs / billing | Enable `run`, `cloudbuild`, `artifactregistry`, `aiplatform`. Link billing. |
+| Build context huge | Clone GitHub in Cloud Shell; do not upload `AgenticOS(Google DEVPOST)`. |
 
 ---
 

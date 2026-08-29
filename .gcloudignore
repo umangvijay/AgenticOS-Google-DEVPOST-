@@ -1,0 +1,15 @@
+# Uploaded to Cloud Build with `gcloud run deploy --source .`
+.gcloudignore
+.git
+.venv
+node_modules
+frontend
+data
+terraform
+docs
+**/.DS_Store
+**/*.pyc
+**/__pycache__
+backend/security/keys
+.env
+.env.local

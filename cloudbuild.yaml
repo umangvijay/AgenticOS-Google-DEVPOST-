@@ -1,5 +1,8 @@
 # Builds API + worker images (same FastAPI binary today) and deploys Cloud Run.
 # Do not pass .env or App Passwords as substitutions — use Secret Manager.
+timeout: 1800s
+options:
+  logging: CLOUD_LOGGING_ONLY
 steps:
   # 1. Build the API Image
   - name: 'gcr.io/cloud-builders/docker'
