@@ -1,5 +1,7 @@
 import PublicNavbar from "@/components/PublicNavbar";
 
+export const metadata = { title: "Terms" };
+
 export default function TermsPage() {
   return (
     <div className="mesh-gradient" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>

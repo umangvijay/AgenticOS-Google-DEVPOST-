@@ -8,6 +8,12 @@ export function generateStaticParams() {
   return DOC_PAGES.map((p) => ({ slug: p.slug }));
 }
 
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const page = DOC_PAGES.find((p) => p.slug === slug);
+  return { title: page?.title || "Docs" };
+}
+
 export default async function DocArticle({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const page = DOC_PAGES.find((p) => p.slug === slug);

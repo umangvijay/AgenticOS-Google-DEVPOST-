@@ -2,6 +2,8 @@ import Link from "next/link";
 import PublicNavbar from "@/components/PublicNavbar";
 import { DiagramScaler } from "@/components/DiagramScaler";
 
+export const metadata = { title: "Home" };
+
 export default function LandingPage() {
   return (
     <div className="mesh-gradient" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>

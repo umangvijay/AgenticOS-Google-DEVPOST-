@@ -1,5 +1,7 @@
 import PublicNavbar from "@/components/PublicNavbar";
 
+export const metadata = { title: "Privacy" };
+
 export default function PrivacyPage() {
   return (
     <div className="mesh-gradient" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
@@ -66,7 +68,7 @@ export default function PrivacyPage() {
                 Contact Us
               </h2>
               <p>
-                If you have any questions or concerns about this Privacy Policy, please contact our legal team at <a href="mailto:privacy@agentos.gmail.com" style={{ color: "var(--accent)", textDecoration: "underline" }}>privacy@agentos.gmail.com</a>.
+                If you have any questions or concerns about this Privacy Policy, please contact our legal team at <a href="mailto:godumang35@gmail.com" style={{ color: "var(--accent)", textDecoration: "underline" }}>godumang35@gmail.com</a>.
               </p>
             </section>
           </div>

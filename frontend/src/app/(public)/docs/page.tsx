@@ -2,6 +2,8 @@ import PublicNavbar from "@/components/PublicNavbar";
 import Link from "next/link";
 import { DOC_PAGES } from "@/content/docs";
 
+export const metadata = { title: "Docs" };
+
 export default function DocsIndexPage() {
   return (
     <div className="mesh-gradient" style={{ minHeight: "100vh" }}>

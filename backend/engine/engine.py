@@ -112,6 +112,7 @@ class WorkflowEngine:
                     logger.info(f"Task {task.task_id} SKIPPED due to skipped dependencies")
                 elif deps_met:
                     if task.status == TaskStatus.WAITING:
+                        logger.info("Waking WAITING task %s; dependencies complete: %s", task.task_id, task.dependencies)
                         task.status = TaskStatus.PENDING
                         await persist_task(self.repo, run_id, task)
                         
@@ -177,6 +178,8 @@ class WorkflowEngine:
         claimed = await maybe_await(self.repo.claim_task(run_id, task_id, lease_seconds))
         if not claimed:
             logger.info(f"Task {task_id} already claimed or completed.")
+            # Still re-evaluate so WAITING dependents (e.g. orchestrator after mcp_build) can wake.
+            await self.evaluate_dag(run_id)
             return
 
         run = await load_run(self.repo, run_id)
@@ -490,13 +493,10 @@ class WorkflowEngine:
 
         catalog = []
         catalog_json = "[]"
+        workflow_context_str = ""
         tool_router = self.agent_factory.tool_router if self.agent_factory else None
 
-        if agent_id and self.agent_factory:
-            agent = self.agent_factory.build_agent(agent_id, context=context)
-            if not agent:
-                raise ValueError(f"Plugin agent {agent_id} could not be resolved.")
-        else:
+        if not (agent_id and self.agent_factory):
             from backend.services.embedding_service import GoogleCloudEmbeddingService
             from backend.agents.context_manager import context_manager
 
@@ -506,16 +506,6 @@ class WorkflowEngine:
             prev_tasks = [t.model_dump(mode="json") for t in run.tasks if t.status in [TaskStatus.COMPLETED, TaskStatus.FAILED] and t.task_id != task.task_id]
             ctx_data = context_manager.build_context(prev_tasks)
             workflow_context_str = f"Summary of older tasks:\n{ctx_data['older_summary']}\n\nRecent tasks:\n{json.dumps(ctx_data['recent_tasks'], indent=2)}"
-
-            agent = get_orchestrator_agent(
-                tool_router=tool_router,
-                catalog_json=catalog_json,
-                memory_repo=self.memory_repo,
-                embedding_service=GoogleCloudEmbeddingService(),
-                user_id=run.user_id,
-                workflow_context=workflow_context_str,
-                execution_context=context,
-            )
 
         task_input = interpolated_input if interpolated_input is not None else task.input_data
         prompt = (
@@ -562,14 +552,49 @@ class WorkflowEngine:
                 return {"reply": blob[:8000], "message": blob[:8000], "tool_result": tool_results[-1]}
             return ""
 
-        try:
-            runner = InMemoryRunner(agent=agent, app_name=settings.APP_NAME)
-            events = await runner.run_debug(prompt)
-        except Exception as e:
-            from backend.services import gemini_client
+        from backend.services import gemini_client
+
+        events = None
+        last_err: Optional[Exception] = None
+        for model_name in gemini_client.candidate_models():
+            try:
+                if agent_id and self.agent_factory:
+                    agent = self.agent_factory.build_agent(agent_id, context=context, model=model_name)
+                    if not agent:
+                        raise ValueError(f"Plugin agent {agent_id} could not be resolved.")
+                else:
+                    from backend.services.embedding_service import GoogleCloudEmbeddingService
+                    agent = get_orchestrator_agent(
+                        tool_router=tool_router,
+                        catalog_json=catalog_json,
+                        memory_repo=self.memory_repo,
+                        embedding_service=GoogleCloudEmbeddingService(),
+                        user_id=run.user_id,
+                        workflow_context=workflow_context_str,
+                        execution_context=context,
+                        model=model_name,
+                    )
+                runner = InMemoryRunner(agent=agent, app_name=settings.APP_NAME)
+                events = await runner.run_debug(prompt)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                if gemini_client.is_retryable_model_error(e):
+                    logger.warning("ADK Gemini %s unavailable (%s); trying next Flash model", model_name, e)
+                    continue
+                break
+
+        if events is None:
+            e = last_err or RuntimeError("ADK runner produced no events")
             msg = str(e)
-            if not (gemini_client.is_quota_error(e) or "429" in msg or "RESOURCE_EXHAUSTED" in msg):
-                raise
+            if not (
+                gemini_client.is_quota_error(e)
+                or gemini_client.is_retryable_model_error(e)
+                or "429" in msg
+                or "RESOURCE_EXHAUSTED" in msg
+            ):
+                raise e
             tool_result = None
             browse_out = None
             if tool_router and catalog:

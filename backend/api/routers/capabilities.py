@@ -4,17 +4,26 @@ Direct capability endpoints so any of these jobs can run without waiting on the 
 POST /api/v1/capabilities/site-health
 POST /api/v1/capabilities/debug
 POST /api/v1/capabilities/generate
+GET  /api/v1/capabilities/generate/{job_id}
 """
 
+import asyncio
+import logging
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from backend.api.dependencies.auth import AuthenticatedUser, require_not_viewer
+from backend.config.settings import settings
 from backend.security.rate_limiter import check_rate_limit
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/capabilities", tags=["capabilities"])
+
+_JOBS: dict[str, dict] = {}
 
 
 class SiteHealthRequest(BaseModel):
@@ -40,6 +49,28 @@ async def _apply_user_key(request, user_id: str) -> None:
     if factory:
         from backend.services.llm_context import load_user_llm_keys
         await load_user_llm_keys(factory.secrets_repo, user_id)
+
+
+def _put_job(job: dict) -> None:
+    _JOBS[job["job_id"]] = job
+    if (settings.STORAGE_BACKEND or "").lower() != "firestore" or not settings.GOOGLE_CLOUD_PROJECT:
+        return
+    from google.cloud import firestore as fs
+    fs.Client(project=settings.GOOGLE_CLOUD_PROJECT).collection("artifact_jobs").document(job["job_id"]).set(job)
+
+
+def _get_job(job_id: str) -> Optional[dict]:
+    if job_id in _JOBS:
+        return _JOBS[job_id]
+    if (settings.STORAGE_BACKEND or "").lower() != "firestore" or not settings.GOOGLE_CLOUD_PROJECT:
+        return None
+    from google.cloud import firestore as fs
+    doc = fs.Client(project=settings.GOOGLE_CLOUD_PROJECT).collection("artifact_jobs").document(job_id).get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict() or {}
+    _JOBS[job_id] = data
+    return data
 
 
 @router.post("/site-health")
@@ -81,18 +112,42 @@ async def ping_gemini(request: Request, user: AuthenticatedUser = Depends(requir
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/generate")
+async def _run_generate_job(job_id: str, user_id: str, brief: str, kind: str, name: str, scale: str) -> None:
+    job = _get_job(job_id) or {"job_id": job_id, "user_id": user_id}
+    job["status"] = "running"
+    await asyncio.to_thread(_put_job, job)
+    try:
+        from backend.services.artifact_builder import generate_project
+        result = await generate_project(user_id, brief, kind=kind, name=name, scale=scale)
+        job.update({"status": "completed", "result": result, "error": None})
+    except Exception as e:
+        logger.exception("Studio generate job %s failed", job_id)
+        job.update({"status": "failed", "error": str(e)[:800], "result": None})
+    await asyncio.to_thread(_put_job, job)
+
+
+@router.post("/generate", status_code=status.HTTP_202_ACCEPTED)
 async def generate(body: GenerateRequest, request: Request, user: AuthenticatedUser = Depends(require_not_viewer)):
     check_rate_limit(f"user:{user.user_id}", "general")
     await _apply_user_key(request, user.user_id)
-    try:
-        from backend.services.artifact_builder import generate_project
-        return await generate_project(user.user_id, body.brief, kind=body.kind, name=body.name, scale=body.scale)
-    except Exception as e:
-        msg = str(e)
-        if "RESOURCE_EXHAUSTED" in msg or "429" in msg or "quota exhausted" in msg.lower() or "UNAUTHENTICATED" in msg:
-            raise HTTPException(
-                status_code=429,
-                detail="Gemini quota is exhausted. Add your own Gemini key or an xAI Grok key in Settings to generate a website or app.",
-            )
-        raise HTTPException(status_code=400, detail=msg)
+    job_id = str(uuid.uuid4())
+    job = {
+        "job_id": job_id,
+        "user_id": user.user_id,
+        "status": "queued",
+        "kind": body.kind,
+        "scale": body.scale,
+        "result": None,
+        "error": None,
+    }
+    await asyncio.to_thread(_put_job, job)
+    asyncio.create_task(_run_generate_job(job_id, user.user_id, body.brief, body.kind, body.name, body.scale))
+    return {"job_id": job_id, "status": "queued"}
+
+
+@router.get("/generate/{job_id}")
+async def generate_status(job_id: str, user: AuthenticatedUser = Depends(require_not_viewer)):
+    job = await asyncio.to_thread(_get_job, job_id)
+    if not job or job.get("user_id") != user.user_id:
+        raise HTTPException(status_code=404, detail="Generate job not found")
+    return job

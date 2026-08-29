@@ -1,6 +1,5 @@
 # Cloud Run API image (also used as Dockerfile.api).
-# Designed to succeed on Cloud Build: no Playwright browsers, pip with deps,
-# no frontend/terraform in the context.
+# Chromium-only Playwright for website MCP. No frontend/terraform in the context.
 
 FROM python:3.11-slim-bookworm
 
@@ -18,6 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
+
+# Chromium only (not Firefox/WebKit). Website MCP needs a browser on Cloud Run.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY backend ./backend
 COPY main.py ./main.py

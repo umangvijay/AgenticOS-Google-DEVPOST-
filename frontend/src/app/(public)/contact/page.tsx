@@ -131,7 +131,11 @@ export default function ContactPage() {
                   <textarea className="input" placeholder="How can AgentOS help you?" value={message} onChange={(e) => setMessage(e.target.value)} required style={{ width: "100%", minHeight: 150, resize: "vertical" }} />
                 </div>
                 <button type="submit" className="btn btn-primary btn-lg" disabled={status === "sending"} style={{ width: "100%" }}>
-                  {status === "sending" ? <span className="spinner" /> : "Send message"}
+                  {status === "sending"
+                    ? <span className="spinner" />
+                    : smtpReady === false
+                      ? "Save message (email is not configured)"
+                      : "Send message"}
                 </button>
               </form>
             )}

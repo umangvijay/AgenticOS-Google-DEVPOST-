@@ -17,6 +17,27 @@ def _as_dict(value: Any) -> Dict[str, Any]:
     return dict(value)
 
 
+def _missing_index(exc: BaseException) -> bool:
+    """True when Firestore rejected a query that needs a composite index."""
+    name = type(exc).__name__
+    msg = str(exc).lower()
+    return (
+        name == "FailedPrecondition"
+        or "failed_precondition" in msg
+        or "requires an index" in msg
+        or "no matching index" in msg
+        or "the query requires an index" in msg
+    )
+
+
+def _created_at_key(run: Dict[str, Any]) -> str:
+    return str(run.get("created_at") or "")
+
+
+def _timestamp_key(event: Dict[str, Any]) -> str:
+    return str(event.get("timestamp") or "")
+
+
 class FirestoreWorkflowRepository(BaseWorkflowRepository):
     """Firestore implementation of BaseWorkflowRepository."""
 
@@ -40,23 +61,54 @@ class FirestoreWorkflowRepository(BaseWorkflowRepository):
         await db.collection("workflow_runs").document(run_id).set(payload)
 
     async def list_runs(self, user_id: str, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+        # Prefer composite index: workflow_runs (user_id ASC, created_at DESC) — firestore.indexes.json
+        # Equality-only fallback works before that index exists (no FailedPrecondition 500).
         db = await self._get_db()
-        query = (
-            db.collection("workflow_runs")
-            .where("user_id", "==", user_id)
-            .order_by("created_at", direction=firestore.Query.DESCENDING)
-            .limit(max(1, limit + max(0, offset)))
-        )
-        runs = []
-        skipped = 0
-        async for doc in query.stream():
-            if skipped < offset:
-                skipped += 1
-                continue
-            if len(runs) >= limit:
-                break
-            runs.append(doc.to_dict() or {})
-        return runs
+        col = db.collection("workflow_runs").where("user_id", "==", user_id)
+        cap = max(1, limit + max(0, offset))
+        try:
+            query = col.order_by("created_at", direction=firestore.Query.DESCENDING).limit(cap)
+            runs = []
+            skipped = 0
+            async for doc in query.stream():
+                if skipped < offset:
+                    skipped += 1
+                    continue
+                if len(runs) >= limit:
+                    break
+                runs.append(doc.to_dict() or {})
+            return runs
+        except Exception as e:
+            if not _missing_index(e):
+                raise
+            runs = []
+            async for doc in col.stream():
+                runs.append(doc.to_dict() or {})
+            runs.sort(key=_created_at_key, reverse=True)
+            start = max(0, offset)
+            return runs[start : start + max(1, limit)]
+
+    async def list_thread_runs(self, user_id: str, thread_id: str) -> List[Dict[str, Any]]:
+        """Thread members via single-field equality (no composite index)."""
+        db = await self._get_db()
+        seen: Dict[str, Dict[str, Any]] = {}
+
+        async def collect(query) -> None:
+            async for doc in query.stream():
+                data = doc.to_dict() or {}
+                if data.get("user_id") != user_id:
+                    continue
+                rid = data.get("run_id") or doc.id
+                seen[rid] = data
+
+        await collect(db.collection("workflow_runs").where("thread_id", "==", thread_id))
+        await collect(db.collection("workflow_runs").where("parent_run_id", "==", thread_id))
+        root = await self.get_run(thread_id)
+        if root and root.get("user_id") == user_id:
+            seen[thread_id] = root
+        out = list(seen.values())
+        out.sort(key=_created_at_key)
+        return out
 
     async def update_run_status(self, run_id: str, status: str) -> None:
         db = await self._get_db()
@@ -161,7 +213,7 @@ class FirestoreWorkflowRepository(BaseWorkflowRepository):
             for i, t in enumerate(tasks):
                 if t.get("task_id") == task_id:
                     status = t.get("status")
-                    if status not in ["PENDING", "RETRYING"]:
+                    if status not in ["PENDING", "RETRYING", "WAITING"]:
                         return False
 
                     now = datetime.now(timezone.utc)
@@ -208,21 +260,35 @@ class FirestoreWorkflowRepository(BaseWorkflowRepository):
         await db.collection("approvals").document(approval_id).set(payload)
 
     async def get_events(self, run_id: str, after_event_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        # Prefer composite index: events (run_id ASC, timestamp ASC) — firestore.indexes.json
         db = await self._get_db()
-        query = db.collection("events").where("run_id", "==", run_id).order_by("timestamp")
+        col = db.collection("events").where("run_id", "==", run_id)
 
-        events = []
-        found_after = after_event_id is None
+        async def drain(query) -> List[Dict[str, Any]]:
+            rows = []
+            async for doc in query.stream():
+                rows.append(doc.to_dict() or {})
+            return rows
 
-        async for doc in query.stream():
-            data = doc.to_dict() or {}
+        try:
+            events = await drain(col.order_by("timestamp"))
+        except Exception as e:
+            if not _missing_index(e):
+                raise
+            events = await drain(col)
+            events.sort(key=_timestamp_key)
+
+        if after_event_id is None:
+            return events
+        found_after = False
+        out = []
+        for data in events:
             if not found_after:
                 if data.get("event_id") == after_event_id:
                     found_after = True
                 continue
-            events.append(data)
-
-        return events
+            out.append(data)
+        return out
 
     async def save_event(self, event: Any) -> None:
         db = await self._get_db()
@@ -238,12 +304,24 @@ class FirestoreWorkflowRepository(BaseWorkflowRepository):
         return None
 
     async def list_pending_approvals(self, user_id: str) -> List[Dict[str, Any]]:
+        # Composite index: approvals (user_id ASC, status ASC) — firestore.indexes.json
         db = await self._get_db()
-        query = db.collection("approvals").where("user_id", "==", user_id).where("status", "==", "PENDING")
-        approvals = []
-        async for doc in query.stream():
-            approvals.append(doc.to_dict() or {})
-        return approvals
+        col = db.collection("approvals").where("user_id", "==", user_id)
+        try:
+            query = col.where("status", "==", "PENDING")
+            approvals = []
+            async for doc in query.stream():
+                approvals.append(doc.to_dict() or {})
+            return approvals
+        except Exception as e:
+            if not _missing_index(e):
+                raise
+            approvals = []
+            async for doc in col.stream():
+                data = doc.to_dict() or {}
+                if data.get("status") == "PENDING":
+                    approvals.append(data)
+            return approvals
 
     async def resolve_approval(self, approval_id: str, new_status: str, decision_by: str) -> bool:
         db = await self._get_db()

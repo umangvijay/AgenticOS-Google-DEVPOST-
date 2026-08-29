@@ -2,6 +2,8 @@ import Link from "next/link";
 import Image from "next/image";
 import PublicNavbar from "@/components/PublicNavbar";
 
+export const metadata = { title: "About" };
+
 export default function AboutPage() {
   return (
     <div className="mesh-gradient" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>

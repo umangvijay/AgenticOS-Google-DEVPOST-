@@ -27,8 +27,6 @@ class TailorRequest(BaseModel):
 from fastapi import UploadFile, File, Form
 import pdfplumber
 import io
-from backend.config.settings import settings
-import json
 
 @router.post("/scan", status_code=status.HTTP_200_OK)
 async def scan_resume(
@@ -57,11 +55,9 @@ async def scan_resume(
         if not text.strip():
             raise HTTPException(status_code=400, detail="Could not extract text from the file.")
             
-        # Analyze with Gemini via google.genai
-        from google import genai
-        
-        client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        
+        # Analyze with Gemini (Flash fallbacks + Vertex region from settings).
+        from backend.services import gemini_client
+
         prompt = f"""
 You are an expert ATS (Applicant Tracking System) Analyzer.
 Analyze the following resume against the job description.
@@ -80,19 +76,9 @@ Provide your analysis in JSON format with exactly these keys:
 
 Output ONLY valid JSON.
 """
-        response = client.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents=prompt
-        )
-        response_text = response.text
-        
-        # Clean up markdown code blocks if present
-        if response_text.startswith("```json"):
-            response_text = response_text[7:]
-        if response_text.endswith("```"):
-            response_text = response_text[:-3]
-            
-        result = json.loads(response_text.strip())
+        result = await gemini_client.generate_json(prompt)
+        if not isinstance(result, dict):
+            raise HTTPException(status_code=500, detail="Resume analysis returned an unexpected payload.")
         result["extracted_text"] = text[:20000]
         return result
         

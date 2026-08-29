@@ -36,17 +36,40 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+const CSRF_STORAGE_KEY = "agentos_csrf_token";
+
+function readStoredCsrf(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return sessionStorage.getItem(CSRF_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStoredCsrf(token: string) {
+  try {
+    sessionStorage.setItem(CSRF_STORAGE_KEY, token);
+  } catch {
+    /* private mode / disabled storage */
+  }
+}
+
 function csrfHeaders(): Record<string, string> {
-  if (typeof document === "undefined") return {};
-  const match = document.cookie.split("; ").find((c) => c.startsWith("agentos_csrf="));
-  if (!match) return {};
-  return { "X-CSRF-Token": decodeURIComponent(match.split("=").slice(1).join("=")) };
+  const token = readStoredCsrf();
+  return token ? { "X-CSRF-Token": token } : {};
 }
 
 async function ensureCsrf(): Promise<void> {
-  if (typeof document === "undefined") return;
-  if (document.cookie.includes("agentos_csrf=")) return;
-  await fetch(`${API_BASE.replace("/api/v1", "")}/api/v1/csrf-token`, { credentials: "include" });
+  if (typeof window === "undefined") return;
+  if (readStoredCsrf()) return;
+  const res = await fetch(`${API_BASE.replace("/api/v1", "")}/api/v1/csrf-token`, {
+    credentials: "include",
+  });
+  if (!res.ok) return;
+  const data = (await res.json().catch(() => ({}))) as { csrf_token?: unknown };
+  const token = typeof data.csrf_token === "string" ? data.csrf_token : "";
+  if (token) writeStoredCsrf(token);
 }
 
 // ── Generic fetcher with auth ────────────────────────────────────
@@ -67,6 +90,15 @@ function formatApiError(errData: unknown, status: number): string {
   return `API error: ${status}`;
 }
 
+function rewriteFetchError(err: unknown): Error {
+  if (err instanceof TypeError) {
+    return new Error(
+      "Could not reach the API (network or CORS). If Cloud Run is waking up, wait a few seconds and retry."
+    );
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
@@ -79,11 +111,16 @@ async function apiFetch<T>(
     ...(options.headers as Record<string, string> || {}),
   };
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+  } catch (err) {
+    throw rewriteFetchError(err);
+  }
 
   if (res.status === 401) {
     // Try refresh
@@ -104,7 +141,12 @@ async function apiFetch<T>(
 
         // Retry original request
         headers.Authorization = `Bearer ${data.access_token}`;
-        const retry = await fetch(`${API_BASE}${path}`, { ...options, headers });
+        let retry: Response;
+        try {
+          retry = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: "include" });
+        } catch (err) {
+          throw rewriteFetchError(err);
+        }
         if (!retry.ok) {
           const errData = await retry.json().catch(() => ({}));
           throw new Error(formatApiError(errData, retry.status));
@@ -119,6 +161,28 @@ async function apiFetch<T>(
     localStorage.removeItem("agentos_auth");
     window.location.href = "/login";
     return new Promise(() => {}) as Promise<T>;
+  }
+
+  if (res.status === 403) {
+    const errData = await res.clone().json().catch(() => ({}));
+    const detail = formatApiError(errData, 403);
+    if (/csrf/i.test(detail)) {
+      writeStoredCsrf("");
+      await ensureCsrf();
+      const retryHeaders: Record<string, string> = {
+        ...headers,
+        ...csrfHeaders(),
+      };
+      try {
+        res = await fetch(`${API_BASE}${path}`, {
+          ...options,
+          headers: retryHeaders,
+          credentials: "include",
+        });
+      } catch (err) {
+        throw rewriteFetchError(err);
+      }
+    }
   }
 
   if (res.status === 204) return {} as T;
@@ -309,8 +373,10 @@ export function subscribeWorkflowEvents(
   const controller = new AbortController();
   const seen = new Set<string>();
 
+  void ensureCsrf();
   fetchEventSource(`${API_BASE}/workflows/${runId}/events`, {
-    headers: authHeaders(),
+    headers: { ...authHeaders(), ...csrfHeaders() },
+    credentials: "include",
     signal: controller.signal,
     onopen: async (res) => {
       if (res.ok && res.status === 200) {
@@ -320,6 +386,15 @@ export function subscribeWorkflowEvents(
       }
     },
     onmessage: (msg) => {
+      if (msg.event === "error") {
+        let text = msg.data || "Event stream failed";
+        try {
+          const parsed = JSON.parse(msg.data) as { error?: string };
+          if (parsed.error) text = parsed.error;
+        } catch { /* keep raw */ }
+        if (onError) onError(new Error(text));
+        return;
+      }
       if (msg.data) {
         try {
           const data = JSON.parse(msg.data) as WorkflowEvent;
@@ -545,18 +620,36 @@ export async function pingGemini() {
 }
 
 export async function generateProject(brief: string, kind = "website", name = "", scale = "standard") {
-  return apiFetch<{
-    artifact_id: string;
-    name: string;
-    summary: string;
-    files: string[];
-    entrypoint: string;
-    kind: string;
-    scale?: string;
-  }>("/capabilities/generate", {
+  const started = await apiFetch<{ job_id: string; status: string }>("/capabilities/generate", {
     method: "POST",
     body: JSON.stringify({ brief, kind, name, scale }),
   });
+  const jobId = started.job_id;
+  const deadline = Date.now() + 8 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const job = await apiFetch<{
+      job_id: string;
+      status: string;
+      error?: string | null;
+      result?: {
+        artifact_id: string;
+        name: string;
+        summary: string;
+        files: string[];
+        entrypoint: string;
+        kind: string;
+        scale?: string;
+      } | null;
+    }>(`/capabilities/generate/${jobId}`);
+    if (job.status === "completed" && job.result) {
+      return job.result;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error || "Generation failed");
+    }
+    await new Promise((r) => setTimeout(r, 2500));
+  }
+  throw new Error("Generation is still running. Open Studio again in a minute — the artifact is stored persistently.");
 }
 
 export async function listArtifacts() {

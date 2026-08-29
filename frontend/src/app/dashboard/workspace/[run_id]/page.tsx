@@ -67,7 +67,10 @@ function TurnView({ workflow }: { workflow: WorkflowRun }) {
     .map((t) => ({ task: t, text: t.status === "COMPLETED" ? assistantText(t) : null }))
     .filter((x) => x.text);
   const failed = (workflow.tasks || []).filter((t) => t.status === "FAILED");
-  const busy = !isTerminal(workflow.status) && replies.length === 0 && failed.length === 0;
+  const inFlight = (workflow.tasks || []).some((t) =>
+    t.status === "RUNNING" || t.status === "PENDING" || t.status === "WAITING" || t.status === "RETRYING"
+  );
+  const busy = (!isTerminal(workflow.status) || inFlight) && replies.length === 0 && failed.length === 0;
 
   return (
     <>
@@ -101,6 +104,12 @@ function TurnView({ workflow }: { workflow: WorkflowRun }) {
         <div style={bubbleStyle("agent")}>
           <span className="spinner" style={{ width: 16, height: 16, display: "inline-block", verticalAlign: "middle", marginRight: 8 }} />
           Thinking…
+        </div>
+      )}
+      {isTerminal(workflow.status) && workflow.status === "FAILED" && replies.length === 0 && failed.length === 0 && (
+        <div style={bubbleStyle("agent")}>
+          <div style={{ fontSize: 11, color: "var(--error)", marginBottom: 6 }}>AgentOS</div>
+          <div style={{ fontSize: 14, lineHeight: 1.55 }}>That run failed before a reply was written. Try sending again.</div>
         </div>
       )}
     </>
@@ -146,6 +155,44 @@ export default function WorkspaceChatPage() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let failCount = 0;
+    const tick = async () => {
+      try {
+        const ids = Array.from(new Set([runId, ...turns.map((t) => t.run_id)]));
+        const fresh = await Promise.all(ids.map((id) => getWorkflow(id)));
+        if (cancelled) return;
+        failCount = 0;
+        setError("");
+        setTurns((prev) => {
+          const byId = new Map(fresh.map((w) => [w.run_id, w]));
+          const next = prev.map((w) => byId.get(w.run_id) || w);
+          for (const w of fresh) {
+            if (!next.some((p) => p.run_id === w.run_id)) next.push(w);
+          }
+          return next;
+        });
+      } catch (e) {
+        failCount += 1;
+        if (!cancelled && failCount >= 3) {
+          setError(e instanceof Error ? e.message : "Could not refresh run status");
+        }
+      }
+    };
+    const active =
+      turns.length === 0 ||
+      turns.some((t) => !isTerminal(t.status) || isWaitingHuman(t));
+    if (!active) return;
+    void tick();
+    const id = window.setInterval(() => { void tick(); }, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId, turns.map((t) => `${t.run_id}:${t.status}`).join("|")]);
 
   useEffect(() => {
     const unsubs = turns.map((turn) => subscribeWorkflowEvents(turn.run_id, (event: WorkflowEvent) => {

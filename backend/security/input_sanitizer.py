@@ -17,7 +17,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # ── Size Limits ───────────────────────────────────────────────────
-MAX_GOAL_LENGTH = 5_000          # Max characters for a workflow goal
+MAX_GOAL_LENGTH = 50_000         # Max characters for a workflow goal
 MAX_UPLOAD_SIZE_MB = 10          # Max file upload size
 MAX_BODY_SIZE_KB = 512           # Max request body size
 MAX_FIELD_LENGTH = 10_000        # Max length for any single text field

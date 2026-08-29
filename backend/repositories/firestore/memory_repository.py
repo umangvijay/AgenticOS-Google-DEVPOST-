@@ -107,6 +107,50 @@ class FirestoreMemoryRepository(BaseMemoryRepository):
         )
         return True
 
+    async def list_memories(
+        self,
+        user_id: str,
+        memory_type: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        db = await self._get_db()
+        col = db.collection("memories").where("user_id", "==", user_id)
+        if memory_type:
+            col = col.where("memory_type", "==", memory_type)
+
+        def _missing_index(exc: BaseException) -> bool:
+            name = type(exc).__name__
+            msg = str(exc).lower()
+            return (
+                name == "FailedPrecondition"
+                or "failed_precondition" in msg
+                or "requires an index" in msg
+                or "the query requires an index" in msg
+            )
+
+        try:
+            query = col.order_by("created_at", direction=firestore.Query.DESCENDING)
+            rows: List[Dict[str, Any]] = []
+            async for doc in query.stream():
+                rows.append(doc.to_dict() or {})
+        except Exception as e:
+            if not _missing_index(e):
+                raise
+            rows = []
+            async for doc in col.stream():
+                rows.append(doc.to_dict() or {})
+            rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+
+        start = max(0, offset)
+        out = []
+        for data in rows[start : start + max(1, limit)]:
+            data = dict(data)
+            data.pop("embedding", None)
+            data.setdefault("id", data.get("memory_id") or data.get("id"))
+            out.append(data)
+        return out
+
     async def get_memories_by_category(self, user_id: str, category: str, limit: int = 50) -> List[Dict[str, Any]]:
         db = await self._get_db()
         query = db.collection("memories")\

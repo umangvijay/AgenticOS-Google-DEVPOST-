@@ -115,6 +115,57 @@ def enrich_plan_from_intent(
 
     return definition
 
+
+def ensure_unique_task_ids(definition: WorkflowDefinition) -> WorkflowDefinition:
+    """Rename colliding planner task_ids in place so validate_dag can succeed."""
+    used = set()
+    for task in definition.tasks:
+        raw = (task.task_id or "task").strip() or "task"
+        candidate = raw
+        n = 2
+        while candidate in used:
+            candidate = f"{raw}_{n}"
+            n += 1
+        if candidate != task.task_id:
+            logger.warning("Renamed duplicate task_id %s -> %s", task.task_id, candidate)
+            task.task_id = candidate
+        used.add(task.task_id)
+    return definition
+
+
+def _is_orchestrator_agent(agent: str) -> bool:
+    name = (agent or "").strip().lower()
+    return name in ("orchestratoragent", "orchestrator") or "orchestrator" in name
+
+
+def wire_mcp_then_use(definition: WorkflowDefinition) -> WorkflowDefinition:
+    """Drop unknown deps (which leave tasks WAITING forever) and make orchestrator wait on MCP builds."""
+    ids = {t.task_id for t in definition.tasks}
+    mcp_ids = [t.task_id for t in definition.tasks if t.agent == "core.mcp_build"]
+    for task in definition.tasks:
+        orig = list(task.dependencies or [])
+        valid = [d for d in orig if d in ids and d != task.task_id]
+        if valid != orig:
+            logger.warning(
+                "Dropped unknown/self dependencies on %s: %s",
+                task.task_id,
+                sorted(set(orig) - set(valid)),
+            )
+            task.dependencies = valid
+        if mcp_ids and _is_orchestrator_agent(task.agent):
+            missing = [mid for mid in mcp_ids if mid not in task.dependencies]
+            if missing:
+                task.dependencies = list(task.dependencies) + missing
+                logger.info("Wired %s to wait on MCP build(s) %s", task.task_id, missing)
+    return definition
+
+
+def prepare_dag(definition: WorkflowDefinition) -> WorkflowDefinition:
+    ensure_unique_task_ids(definition)
+    wire_mcp_then_use(definition)
+    validate_dag(definition)
+    return definition
+
 class DAGValidationError(Exception):
     pass
 
@@ -122,7 +173,7 @@ def validate_dag(definition: WorkflowDefinition) -> None:
     task_ids = set()
     dependencies_map = {}
     
-    # 1. Duplicate task IDs and basic validation
+    # 1. Duplicate task IDs and basic validation (prepare_dag uniquifies first)
     for task in definition.tasks:
         if task.task_id in task_ids:
             raise DAGValidationError(f"Duplicate task ID found: {task.task_id}")

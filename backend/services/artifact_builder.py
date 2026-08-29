@@ -8,13 +8,14 @@ and served via the artifacts API. Generated code is never executed.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from backend.config.settings import settings
 from backend.services import gemini_client
@@ -209,36 +210,122 @@ Only these paths. Full source in each content field.
     }
     (dest / "artifact.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     logger.info("Generated %s/%s artifact %s (%d files) for user %s", kind, scale, artifact_id, len(written), user_id)
+    _persist_artifact_remote(metadata, dest)
     return metadata
 
 
+def _use_firestore() -> bool:
+    return (settings.STORAGE_BACKEND or "").lower() == "firestore"
+
+
+def _firestore_sync():
+    from google.cloud import firestore as fs
+    project = settings.GOOGLE_CLOUD_PROJECT
+    if not project:
+        return None
+    return fs.Client(project=project)
+
+
+def _persist_artifact_remote(metadata: Dict[str, Any], dest: Path) -> None:
+    if not _use_firestore():
+        return
+    db = _firestore_sync()
+    if db is None:
+        logger.error("Artifact generated on ephemeral disk only — GOOGLE_CLOUD_PROJECT is unset")
+        return
+    aid = metadata["artifact_id"]
+    db.collection("artifacts").document(aid).set(dict(metadata))
+    for rel in metadata.get("files") or []:
+        path = dest / rel
+        content = path.read_text(encoding="utf-8") if path.is_file() else ""
+        doc_id = hashlib.sha256(f"{aid}/{rel}".encode("utf-8")).hexdigest()
+        db.collection("artifact_files").document(doc_id).set(
+            {
+                "artifact_id": aid,
+                "user_id": metadata["user_id"],
+                "path": rel,
+                "content": content,
+            }
+        )
+
+
 def list_artifacts(user_id: str) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    seen = set()
     folder = artifacts_root() / user_id
-    if not folder.exists():
-        return []
-    items = []
-    for child in sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-        meta = child / "artifact.json"
-        if meta.is_file():
+    if folder.exists():
+        for child in sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+            meta = child / "artifact.json"
+            if meta.is_file():
+                try:
+                    data = json.loads(meta.read_text(encoding="utf-8"))
+                    aid = data.get("artifact_id")
+                    if aid:
+                        seen.add(aid)
+                    items.append(data)
+                except Exception:
+                    logger.warning("Could not read artifact metadata at %s", meta)
+    if _use_firestore():
+        db = _firestore_sync()
+        if db is not None:
             try:
-                items.append(json.loads(meta.read_text(encoding="utf-8")))
+                for doc in db.collection("artifacts").where("user_id", "==", user_id).stream():
+                    data = doc.to_dict() or {}
+                    aid = data.get("artifact_id") or doc.id
+                    if aid in seen:
+                        continue
+                    seen.add(aid)
+                    items.append(data)
             except Exception:
-                continue
+                logger.exception("Firestore artifact list failed for user %s", user_id)
+                raise
+    items.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
     return items
 
 
 def load_artifact(user_id: str, artifact_id: str) -> Dict[str, Any]:
     meta = artifacts_root() / user_id / artifact_id / "artifact.json"
-    if not meta.is_file():
-        raise ArtifactError("Artifact not found")
-    return json.loads(meta.read_text(encoding="utf-8"))
+    if meta.is_file():
+        data = json.loads(meta.read_text(encoding="utf-8"))
+        if data.get("user_id") == user_id:
+            return data
+    if _use_firestore():
+        db = _firestore_sync()
+        if db is not None:
+            doc = db.collection("artifacts").document(artifact_id).get()
+            if doc.exists:
+                data = doc.to_dict() or {}
+                if data.get("user_id") == user_id:
+                    return data
+    raise ArtifactError("Artifact not found")
+
+
+def read_artifact_content(user_id: str, artifact_id: str, relpath: str) -> str:
+    rel = _safe_relpath(relpath)
+    path = artifacts_root() / user_id / artifact_id / rel
+    if path.is_file():
+        path.resolve().relative_to((artifacts_root() / user_id / artifact_id).resolve())
+        return path.read_text(encoding="utf-8")
+    if _use_firestore():
+        db = _firestore_sync()
+        if db is not None:
+            doc_id = hashlib.sha256(f"{artifact_id}/{rel}".encode("utf-8")).hexdigest()
+            doc = db.collection("artifact_files").document(doc_id).get()
+            if doc.exists:
+                data = doc.to_dict() or {}
+                if data.get("user_id") == user_id:
+                    return str(data.get("content") or "")
+    raise ArtifactError("File not found")
 
 
 def read_artifact_file(user_id: str, artifact_id: str, relpath: str) -> Path:
     rel = _safe_relpath(relpath)
     path = artifacts_root() / user_id / artifact_id / rel
-    if not path.is_file():
-        raise ArtifactError("File not found")
-    # Stay inside the artifact directory
-    path.resolve().relative_to((artifacts_root() / user_id / artifact_id).resolve())
-    return path
+    if path.is_file():
+        path.resolve().relative_to((artifacts_root() / user_id / artifact_id).resolve())
+        return path
+    content = read_artifact_content(user_id, artifact_id, rel)
+    dest = artifacts_root() / user_id / artifact_id / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(content, encoding="utf-8")
+    return dest

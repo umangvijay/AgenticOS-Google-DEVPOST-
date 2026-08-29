@@ -1,20 +1,15 @@
 import json
+from typing import Optional
 from google.adk.agents.llm_agent import LlmAgent
-from google.adk.models.google_llm import Gemini
-from backend.config.settings import settings
-from backend.services.llm_context import gemini_adk_kwargs
+from backend.services.llm_context import adk_gemini
 from backend.repositories.memory_repository import MemoryRepository
 from backend.services.embedding_service import EmbeddingService
 from backend.models.resume import Resume
 from backend.services.jd_parser_service import JDParserService
 from backend.services.resume_tailor_service import ResumeTailorService
 
-def get_orchestrator_agent(tool_router=None, catalog_json: str = "[]", memory_repo: MemoryRepository = None, embedding_service: EmbeddingService = None, user_id: str = "default_user", workflow_context: str = "", execution_context: dict = None) -> LlmAgent:
-    llm = Gemini(
-        model=settings.GEMINI_MODEL,
-        client_kwargs=gemini_adk_kwargs(),
-        tools=[{"google_search": {}}]
-    )
+def get_orchestrator_agent(tool_router=None, catalog_json: str = "[]", memory_repo: MemoryRepository = None, embedding_service: EmbeddingService = None, user_id: str = "default_user", workflow_context: str = "", execution_context: dict = None, model: Optional[str] = None) -> LlmAgent:
+    llm = adk_gemini(model, tools=[{"google_search": {}}])
     
     async def call_external_tool(agent_tool_name: str, arguments_json: str) -> str:
         """Call a tool from the external tool catalog.

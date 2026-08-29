@@ -166,7 +166,7 @@ async def create_workflow(
             WorkflowRun, Task, TaskStatus, WorkflowDefinition,
             WorkflowEvent, WorkflowEventType,
         )
-        from backend.engine.dag_validator import validate_dag, enrich_plan_from_intent, DAGValidationError
+        from backend.engine.dag_validator import prepare_dag, enrich_plan_from_intent, DAGValidationError
         from backend.engine.direct_plan import plan_from_goal
 
         tool_router = getattr(request.app.state, "tool_router", None)
@@ -181,7 +181,7 @@ async def create_workflow(
         else:
             from backend.agents.intent.intent_agent import get_intent_agent
             from backend.agents.planner.planner_agent import get_planner_agent
-            from google.adk.runners import InMemoryRunner
+            from backend.services import gemini_client
 
             def extract_event_text(events):
                 for event in reversed(events):
@@ -195,9 +195,11 @@ async def create_workflow(
                                 return part.text
                 return None
 
-            intent_agent = get_intent_agent()
-            intent_runner = InMemoryRunner(agent=intent_agent, app_name=settings.APP_NAME)
-            intent_events = await intent_runner.run_debug(goal)
+            intent_events = await gemini_client.run_adk_debug(
+                lambda model: get_intent_agent(model=model),
+                goal,
+                settings.APP_NAME,
+            )
             raw_intent = extract_event_text(intent_events)
 
             if isinstance(raw_intent, dict):
@@ -209,9 +211,12 @@ async def create_workflow(
 
             logger.info(f"[{run_id[:8]}] Intent: {intent_result}")
 
-            planner_agent = get_planner_agent(catalog_json=json.dumps(live_catalog))
-            planner_runner = InMemoryRunner(agent=planner_agent, app_name=settings.APP_NAME)
-            plan_events = await planner_runner.run_debug(json.dumps(intent_result))
+            catalog_blob = json.dumps(live_catalog)
+            plan_events = await gemini_client.run_adk_debug(
+                lambda model: get_planner_agent(catalog_json=catalog_blob, model=model),
+                json.dumps(intent_result),
+                settings.APP_NAME,
+            )
             raw_plan = extract_event_text(plan_events)
 
             if isinstance(raw_plan, dict):
@@ -233,7 +238,7 @@ async def create_workflow(
                         "prompt": f"Earlier in this conversation:\n{ctx}\n\nNew message:\n{prompt}",
                     }
 
-        validate_dag(workflow_def)
+        prepare_dag(workflow_def)
 
         # 3. Create run with real user
         run = WorkflowRun(
@@ -249,7 +254,7 @@ async def create_workflow(
                 run_id=run_id, user_id=user.user_id,
                 agent=t_def.agent, tool=t_def.tool,
                 input_data=t_def.input_data, dependencies=t_def.dependencies,
-                timeout_seconds=max(t_def.timeout_seconds, 180) if t_def.agent in ("Orchestrator", "core.mcp_build") else t_def.timeout_seconds,
+                timeout_seconds=max(t_def.timeout_seconds, 180) if t_def.agent in ("Orchestrator", "OrchestratorAgent", "core.mcp_build") or "orchestrator" in (t_def.agent or "").lower() else t_def.timeout_seconds,
                 max_retries=t_def.max_retries,
                 recovery_enabled=True,
                 status=TaskStatus.PENDING,
@@ -366,16 +371,43 @@ async def stream_events(
 
     async def event_generator():
         last_event_id = None
-        while True:
-            if await request.is_disconnected():
-                break
-            events = await factory.workflow_repo.get_events(run_id, after_event_id=last_event_id)
-            for event in events:
-                last_event_id = event["event_id"]
-                yield f"id: {event['event_id']}\ndata: {json.dumps(event)}\n\n"
-            await asyncio.sleep(1)
+        try:
+            yield ": connected\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    events = await factory.workflow_repo.get_events(run_id, after_event_id=last_event_id)
+                except Exception as exc:
+                    logger.exception("SSE get_events failed for run %s", run_id)
+                    yield f"event: error\ndata: {json.dumps({'error': str(exc)[:800]})}\n\n"
+                    return
+                for event in events:
+                    last_event_id = event.get("event_id")
+                    yield f"id: {last_event_id}\ndata: {json.dumps(event, default=str)}\n\n"
+                await asyncio.sleep(1)
+        except Exception as exc:
+            logger.exception("SSE stream failed for run %s", run_id)
+            yield f"event: error\ndata: {json.dumps({'error': str(exc)[:800]})}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    origin = request.headers.get("origin") or ""
+    cors = {}
+    if origin in settings.CORS_ALLOWED_ORIGINS:
+        cors = {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
+        }
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            **cors,
+        },
+    )
 
 
 # ══════════════════════════════════════════════════════════════════

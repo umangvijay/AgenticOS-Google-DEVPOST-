@@ -203,6 +203,7 @@ class SQLiteWorkflowRepository(BaseWorkflowRepository):
               AND (
                 status = 'PENDING'
                 OR status = 'RETRYING'
+                OR status = 'WAITING'
                 OR (status = 'RUNNING' AND lease_expires_at < ?)
               )
             """,

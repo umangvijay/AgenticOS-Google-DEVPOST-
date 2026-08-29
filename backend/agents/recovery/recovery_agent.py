@@ -1,26 +1,13 @@
 import logging
+from typing import Optional
 from google.adk.agents.llm_agent import LlmAgent
-from google.adk.models.google_llm import Gemini
-from backend.config.settings import settings
+from backend.services.llm_context import adk_gemini
 from backend.models.recovery import RecoveryAction
 
 logger = logging.getLogger(__name__)
 
-def get_recovery_agent() -> LlmAgent:
-    client_kwargs = {}
-    if not settings.GEMINI_API_KEY:
-        client_kwargs = {
-            "vertexai": True,
-            "project": settings.GOOGLE_CLOUD_PROJECT,
-            "location": settings.GOOGLE_CLOUD_REGION
-        }
-    else:
-        client_kwargs = {"api_key": settings.GEMINI_API_KEY}
-        
-    llm = Gemini(
-        model=settings.GEMINI_MODEL,
-        client_kwargs=client_kwargs
-    )
+def get_recovery_agent(model: Optional[str] = None) -> LlmAgent:
+    llm = adk_gemini(model)
     
     instruction = """
     You are the AgenticOS RecoveryAgent.

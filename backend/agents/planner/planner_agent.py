@@ -1,7 +1,7 @@
+from typing import Optional
 from google.adk.agents.llm_agent import LlmAgent
-from google.adk.models.google_llm import Gemini
-from backend.config.settings import settings
-from backend.services.llm_context import gemini_adk_kwargs
+from backend.services.llm_context import adk_gemini
+from backend.services.gemini_client import candidate_models
 from backend.models.schemas import WorkflowDefinition
 
 CORE_NODES_DOC = """
@@ -29,11 +29,8 @@ Reference an earlier task's output anywhere in input_data with {{ tasks.<task_id
 """
 
 
-def get_planner_agent(catalog_json: str = "[]") -> LlmAgent:
-    llm = Gemini(
-        model=settings.GEMINI_MODEL,
-        client_kwargs=gemini_adk_kwargs(),
-    )
+def get_planner_agent(catalog_json: str = "[]", model: Optional[str] = None) -> LlmAgent:
+    llm = adk_gemini(candidate_models(model)[0])
 
     instruction = f"""You are the Planner Agent. Given an Intent, produce a structured workflow definition (DAG) that accomplishes it.
 

@@ -26,7 +26,7 @@ const GROUPS = [
     faqs: [
       { q: "Can I use my own Gemini API key?", a: "Yes. Settings → Your Gemini API key, or Vault with name gemini and field api_key. It is encrypted and used for your runs so you are not blocked by the shared quota." },
       { q: "Is my data secure?", a: "Credentials use AES-256-GCM. Values are never returned after save. Browser automation stays on the starting domain. CSRF, JWT (RS256), and sandboxed MCP generation are on by default." },
-      { q: "Does Contact actually email you?", a: "Yes. Send a message on /contact. It is stored and delivered to godumang35@gmail.com. Privacy questions: privacy@agentos.gmail.com." },
+      { q: "Does Contact actually email you?", a: "It is always stored. It is emailed to godumang35@gmail.com only when CONTACT_SMTP_PASSWORD is set to a Gmail App Password (smtp_configured: true). If mail is not configured, the contact page says so and does not claim the message was sent. Privacy questions: godumang35@gmail.com." },
     ],
   },
   {

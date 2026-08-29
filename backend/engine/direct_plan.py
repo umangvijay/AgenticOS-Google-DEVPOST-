@@ -40,9 +40,9 @@ APP_WORDS = (
     "build me a", "scaffold", "multi-page", "generate a site",
 )
 USE_AFTER_MCP = (
-    "so i can", "so that i", "then ", " and then", "use them", "use those",
-    "use the tool", "call the", "list my", "get my", "fetch ", "now ",
-    "using it", "using them", "and call",
+    "so i can", "so that i", "then ", " and then",     "use them", "use those", "use it", "use the tool", "call the", "call one",
+    "list my", "get my", "fetch ", "now ", "using it", "using them", "and call",
+    "then call", "then use",
 )
 EMAIL_WORDS = (
     "email", "e-mail", "e mail", "send mail", "send an email", "write the email",

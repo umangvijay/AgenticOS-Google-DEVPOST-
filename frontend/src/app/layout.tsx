@@ -17,7 +17,10 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "AgentOS — The Autonomous AI Workspace",
+  title: {
+    default: "AgentOS — The Autonomous AI Workspace",
+    template: "%s · AgentOS",
+  },
   description:
     "AgentOS is the autonomous workspace that builds its own tools. Give it a goal, and it plans, executes, and delivers — building any missing integrations along the way.",
   keywords: ["AI", "autonomous", "workspace", "agents", "MCP", "integrations", "automation"],

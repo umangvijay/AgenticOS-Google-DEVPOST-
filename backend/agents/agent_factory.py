@@ -1,8 +1,7 @@
 from typing import Optional, List, Dict, Any
 from google.adk.agents.llm_agent import LlmAgent
-from google.adk.models.google_llm import Gemini
-from backend.config.settings import settings
-from backend.services.llm_context import gemini_adk_kwargs
+from backend.services.llm_context import adk_gemini
+from backend.services.gemini_client import candidate_models
 from backend.models.plugin import PluginAgentDefinition
 from backend.services.runtime_snapshot import RuntimeSnapshotRegistry
 from backend.observability.tracing import get_tracer
@@ -17,7 +16,7 @@ class AgentFactory:
         self.snapshot_registry = snapshot_registry
         self.tool_router = tool_router
 
-    def build_agent(self, agent_id: str, context: Optional[Dict[str, Any]] = None) -> Optional[LlmAgent]:
+    def build_agent(self, agent_id: str, context: Optional[Dict[str, Any]] = None, model: Optional[str] = None) -> Optional[LlmAgent]:
         """
         Dynamically constructs an ADK LlmAgent based on the active runtime snapshot.
         """
@@ -33,10 +32,7 @@ class AgentFactory:
                 logger.warning(f"Agent {agent_id} not found in current snapshot v{snapshot.version}")
                 return None
                 
-            llm = Gemini(
-                model=settings.GEMINI_MODEL,
-                client_kwargs=gemini_adk_kwargs(),
-            )
+            llm = adk_gemini(candidate_models(model)[0])
             
             # We need to build the tool functions that delegate to ToolRouter
             agent_tools = []

@@ -60,6 +60,10 @@ function SignupContent() {
   const isGuest = user?.role === "guest";
 
   useEffect(() => {
+    document.title = "Sign up · AgentOS";
+  }, []);
+
+  useEffect(() => {
     if (!isLoading && isAuthenticated && !isGuest) router.replace("/dashboard");
   }, [isAuthenticated, isLoading, isGuest, router]);
 

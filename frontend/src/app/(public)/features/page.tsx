@@ -2,6 +2,8 @@ import Link from "next/link";
 import Image from "next/image";
 import PublicNavbar from "@/components/PublicNavbar";
 
+export const metadata = { title: "Features" };
+
 export default function FeaturesPage() {
   return (
     <div className="mesh-gradient" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
@@ -56,7 +58,7 @@ export default function FeaturesPage() {
               The Intent Agent plans, the Orchestrator executes, the Research Agent gathers context, and the Recovery Agent handles failures.
             </p>
             <ul style={{ listStyle: "none", padding: 0, display: "flex", flexDirection: "column", gap: 12, color: "var(--text-secondary)" }}>
-              <li style={{ display: "flex", gap: 12 }}><span style={{ color: "var(--success)" }}>✓</span> <span>Powered by Google Gemini 1.5 Pro</span></li>
+              <li style={{ display: "flex", gap: 12 }}><span style={{ color: "var(--success)" }}>✓</span> <span>Powered by Google Gemini Flash</span></li>
               <li style={{ display: "flex", gap: 12 }}><span style={{ color: "var(--success)" }}>✓</span> <span>Circuit breakers for API rate limits</span></li>
               <li style={{ display: "flex", gap: 12 }}><span style={{ color: "var(--success)" }}>✓</span> <span>Human-in-the-loop approval requests</span></li>
             </ul>

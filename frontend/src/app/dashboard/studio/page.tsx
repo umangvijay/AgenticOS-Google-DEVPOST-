@@ -101,7 +101,7 @@ export default function StudioPage() {
               }
               return result;
             }, setArtifact)}>
-              {busy === "g" ? "Generating…" : "Generate"}
+              {busy === "g" ? "Generating… (stored persistently, polling status)" : "Generate"}
             </button>
           </div>
           {artifact && (

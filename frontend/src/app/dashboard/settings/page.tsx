@@ -270,11 +270,14 @@ export default function SettingsPage() {
               <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: "var(--text-secondary)", marginBottom: 6 }}>Default LLM Model</label>
               <select 
                 className="input" 
-                value={settings?.default_model || "gemini-3.5-flash"}
+                value={settings?.default_model || "gemini-3.7-flash"}
                 onChange={e => setSettings(s => s ? {...s, default_model: e.target.value} : s)}
               >
-                <option value="gemini-3.5-flash">Gemini 3.5 Flash (Fast)</option>
-                <option value="gemini-3.5-pro">Gemini 3.5 Pro (Reasoning)</option>
+                <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+                <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
+                <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite</option>
+                <option value="gemini-3.6-flash-lite">Gemini 3.6 Flash-Lite</option>
               </select>
             </div>
           </div>

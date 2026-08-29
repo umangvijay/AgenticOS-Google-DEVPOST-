@@ -75,7 +75,10 @@ async function fetchJson(url: string, init: RequestInit, timeoutMs: number) {
     return data;
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error("The request timed out. Check that the API is running, then try again.");
+      throw new Error("The API took too long to wake up (Cloud Run cold start). Wait a few seconds and try again.");
+    }
+    if (err instanceof TypeError) {
+      throw new Error("Could not reach the API. Wait a few seconds if the service is starting, then try again.");
     }
     throw err;
   } finally {
@@ -142,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify({ email, password }),
-    }, 12000);
+    }, 30000);
     persistAuth(data.user, data.access_token, data.refresh_token);
   }, [persistAuth]);
 
@@ -152,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify({ email, password, name }),
-    }, 15000);
+    }, 30000);
     persistAuth(data.user, data.access_token, data.refresh_token);
   }, [persistAuth]);
 
@@ -166,7 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       body: JSON.stringify(body),
-    }, 15000);
+    }, 30000);
     persistAuth(data.user, data.access_token, data.refresh_token);
   }, [persistAuth]);
 
@@ -176,7 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { "Content-Type": "application/json" },
       credentials: "include",
       signal,
-    }, 8000);
+    }, 45000);
     persistAuth(data.user, data.access_token, data.refresh_token);
   }, [persistAuth]);
 

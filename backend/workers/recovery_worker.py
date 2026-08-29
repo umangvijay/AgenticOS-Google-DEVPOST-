@@ -6,7 +6,6 @@ from backend.models.schemas import TaskRecoveryEvent, TaskStatus, TaskTriggerEve
 from backend.models.recovery import RecoveryContext, RecoveryAction, RecoveryActionEnum
 from backend.agents.recovery.recovery_agent import get_recovery_agent
 from backend.engine.repo_adapter import load_run, persist_task
-from google.adk.runners import InMemoryRunner
 from datetime import datetime, timezone
 
 logger = logging.getLogger("recovery_worker")
@@ -63,11 +62,14 @@ class RecoveryWorker:
                 safe_error_details="Semantic violation occurred during execution."
             )
 
-            agent = get_recovery_agent()
-            runner = InMemoryRunner(agent=agent, app_name="AgentOS")
+            from backend.services import gemini_client
 
             prompt = f"Please analyze this recovery context and provide a RecoveryAction:\n{context.model_dump_json()}"
-            events = await runner.run_debug(prompt)
+            events = await gemini_client.run_adk_debug(
+                lambda model: get_recovery_agent(model=model),
+                prompt,
+                "AgentOS",
+            )
 
             if not events:
                 raise ValueError("RecoveryAgent returned empty response")

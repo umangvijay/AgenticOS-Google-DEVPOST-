@@ -32,23 +32,30 @@ class JDParserService:
         """
         
         try:
-            # We construct a slightly reduced schema definition for the model to ensure compatibility with Gemini structured output.
-            # We can rely on Pydantic to do the final parsing.
-            response = self.client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=JobDescription,
-                    temperature=0.1
-                )
-            )
-            
-            # The response text should be valid JSON matching the JobDescription schema
-            if not response.text:
-                raise ValueError("Model returned empty response.")
-                
-            return JobDescription.model_validate_json(response.text)
+            from backend.services.gemini_client import candidate_models, is_retryable_model_error
+
+            last = None
+            for candidate in candidate_models():
+                try:
+                    response = self.client.models.generate_content(
+                        model=candidate,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=JobDescription,
+                            temperature=0.1
+                        )
+                    )
+                    if not response.text:
+                        raise ValueError("Model returned empty response.")
+                    return JobDescription.model_validate_json(response.text)
+                except Exception as e:
+                    last = e
+                    if is_retryable_model_error(e):
+                        logger.warning("JD parser Gemini %s unavailable (%s)", candidate, e)
+                        continue
+                    raise
+            raise last or ValueError("Model returned empty response.")
         except Exception as e:
             logger.error(f"Failed to parse JD: {e}")
             raise

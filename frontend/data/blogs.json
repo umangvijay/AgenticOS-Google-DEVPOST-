@@ -9,7 +9,7 @@
     "title": "How to Build a Custom Workflow in 10 Minutes",
     "date": "August 2, 2026",
     "category": "Tutorials",
-    "excerpt": "A step-by-step guide to using our visual workflow editor to automate your customer support pipeline."
+    "excerpt": "A step-by-step guide to describing a customer-support goal in chat so AgentOS plans a DAG, builds any missing MCP tools, and runs them against live APIs."
   },
   {
     "title": "The Future of Human-in-the-Loop AI",

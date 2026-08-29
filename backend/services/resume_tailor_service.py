@@ -93,15 +93,30 @@ class ResumeTailorService:
         """
         
         try:
-            response = self.client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=Resume,
-                    temperature=0.2
-                )
-            )
+            from backend.services.gemini_client import candidate_models, is_retryable_model_error
+
+            last = None
+            response = None
+            for candidate in candidate_models():
+                try:
+                    response = self.client.models.generate_content(
+                        model=candidate,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=Resume,
+                            temperature=0.2
+                        )
+                    )
+                    break
+                except Exception as e:
+                    last = e
+                    if is_retryable_model_error(e):
+                        logger.warning("Resume tailor Gemini %s unavailable (%s)", candidate, e)
+                        continue
+                    raise
+            if response is None:
+                raise last or ValueError("Model returned empty response.")
             
             if not response.text:
                 raise ValueError("Model returned empty response.")

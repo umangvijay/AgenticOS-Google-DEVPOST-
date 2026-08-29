@@ -22,7 +22,7 @@ DEFAULT_SETTINGS = {
     "notifications_approval": True,
     "notifications_enabled": True,
     "auto_approve_low_risk": False,
-    "default_model": "gemini-3.6-flash",
+    "default_model": "gemini-3.7-flash",
     "daily_token_limit": 1_000_000,
 }
 

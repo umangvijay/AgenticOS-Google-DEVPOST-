@@ -4,10 +4,9 @@ import asyncio
 from typing import Dict, Any, List
 
 from google.adk.agents.llm_agent import LlmAgent
-from google.adk.models.google_llm import Gemini
 from google.genai import types
 
-from backend.config.settings import settings
+from backend.services.llm_context import adk_gemini
 from backend.repositories.memory_repository import MemoryRepository
 from backend.services.embedding_service import EmbeddingService
 
@@ -20,21 +19,7 @@ class ResearchAgent:
     """
     
     def __init__(self, memory_repo: MemoryRepository = None, embedding_service: EmbeddingService = None):
-        client_kwargs = {}
-        if not settings.GEMINI_API_KEY:
-            client_kwargs = {
-                "vertexai": True,
-                "project": settings.GOOGLE_CLOUD_PROJECT,
-                "location": settings.GOOGLE_CLOUD_REGION
-            }
-        else:
-            client_kwargs = {"api_key": settings.GEMINI_API_KEY}
-            
-        self.llm = Gemini(
-            model=settings.GEMINI_MODEL,
-            client_kwargs=client_kwargs,
-            tools=[{"google_search": {}}] # Enable Google Search Grounding
-        )
+        self.llm = adk_gemini(tools=[{"google_search": {}}])
         self.memory_repo = memory_repo
         self.embedding_service = embedding_service
         self.max_hops = 8

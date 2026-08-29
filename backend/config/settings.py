@@ -35,7 +35,9 @@ class Settings(BaseSettings):
 
     # ── Google Cloud (Optional — only needed when STORAGE_BACKEND=firestore) ─
     GOOGLE_CLOUD_PROJECT: Optional[str] = None
-    GOOGLE_CLOUD_REGION: str = "us-central1"
+    # Vertex publisher Flash models are served from location=global.
+    # Override with GOOGLE_CLOUD_REGION; do not hardcode us-central1 in callers.
+    GOOGLE_CLOUD_REGION: str = "global"
     FIRESTORE_DATABASE_ID: str = "(default)"
 
     FIRESTORE_COLLECTION_USERS: str = "users"
@@ -44,9 +46,9 @@ class Settings(BaseSettings):
     FIRESTORE_COLLECTION_TASKS: str = "tasks"
 
     # ── Gemini AI ────────────────────────────────────────────────
-    # Per spec: gemini-3.5-flash as default everywhere.
-    # gemini-3.1-pro only for tasks needing deeper reasoning.
-    GEMINI_MODEL: str = "gemini-3.6-flash"
+    # Flash only (3.5 / 3.6 / 3.7). gemini_client retries the other Flash IDs
+    # when Vertex returns NOT_FOUND for the configured name.
+    GEMINI_MODEL: str = "gemini-3.7-flash"
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-2-preview"
     GEMINI_API_KEY: Optional[str] = None
 

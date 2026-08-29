@@ -3,6 +3,8 @@ import React from "react";
 import PublicNavbar from "@/components/PublicNavbar";
 import dynamic from "next/dynamic";
 
+export const metadata = { title: "Pricing" };
+
 const TiltCard = dynamic(() => import("@/components/TiltCard"));
 
 export default function PricingPage() {
@@ -34,7 +36,7 @@ export default function PricingPage() {
                 <li className="flex gap-2"><span className="text-[var(--success)]">✓</span> 5 Custom MCPs</li>
                 <li className="flex gap-2"><span className="text-[var(--success)]">✓</span> Community Support</li>
               </ul>
-              <Link href="/signup" className="btn btn-secondary w-full mt-auto">Get Started</Link>
+              <Link href="/get-started" className="btn btn-secondary w-full mt-auto">Start free</Link>
             </TiltCard>
 
             {/* Pro Plan */}
@@ -48,10 +50,10 @@ export default function PricingPage() {
               <ul className="list-none p-0 mb-8 flex flex-col gap-3 flex-1 font-medium antialiased">
                 <li className="flex gap-2"><span className="text-[var(--success)]">✓</span> Unlimited Workflow runs</li>
                 <li className="flex gap-2"><span className="text-[var(--success)]">✓</span> Unlimited Custom MCPs</li>
-                <li className="flex gap-2"><span className="text-[var(--success)]">✓</span> GPT-4o & Claude 3.5 Sonnet Support</li>
+                <li className="flex gap-2"><span className="text-[var(--success)]">✓</span> Gemini Flash models (3.5 / 3.6 / 3.7)</li>
                 <li className="flex gap-2"><span className="text-[var(--success)]">✓</span> Priority Email Support</li>
               </ul>
-              <Link href="/signup" className="btn btn-primary w-full mt-auto text-center">Upgrade to Pro</Link>
+              <Link href="/contact" className="btn btn-primary w-full mt-auto text-center">Request paid access</Link>
             </TiltCard>
 
             {/* Enterprise Plan */}

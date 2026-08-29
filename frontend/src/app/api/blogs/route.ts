@@ -62,6 +62,19 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const auth = request.headers.get("authorization") || "";
+    if (!auth.toLowerCase().startsWith("bearer ")) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+    const api = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "http://localhost:8000/api/v1";
+    const me = await fetch(`${api.replace(/\/$/, "")}/auth/me`, {
+      headers: { Authorization: auth },
+      cache: "no-store",
+    });
+    if (!me.ok) {
+      return NextResponse.json({ error: "Invalid or expired session" }, { status: 401 });
+    }
+
     const body = await request.json();
     const { title, category, excerpt } = body;
     if (!title || !category || !excerpt) {

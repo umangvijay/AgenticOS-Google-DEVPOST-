@@ -102,6 +102,7 @@ function DashboardInner({ children }: { children: ReactNode }) {
   const [isMobile, setIsMobile] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [recents, setRecents] = useState<WorkflowRun[]>([]);
+  const [recentsError, setRecentsError] = useState("");
   
   // Notification Panel State
   const [showNotifications, setShowNotifications] = useState(false);
@@ -117,6 +118,26 @@ function DashboardInner({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setMobileOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    const titles: Record<string, string> = {
+      "/dashboard": "New chat · AgentOS",
+      "/dashboard/workflows": "Runs · AgentOS",
+      "/dashboard/integrations": "Integrations · AgentOS",
+      "/dashboard/integrations/create": "Create MCP · AgentOS",
+      "/dashboard/studio": "Studio · AgentOS",
+      "/dashboard/resume": "Resume · AgentOS",
+      "/dashboard/credentials": "Vault · AgentOS",
+      "/dashboard/schedules": "Schedules · AgentOS",
+      "/dashboard/settings": "Settings · AgentOS",
+      "/dashboard/notifications": "Notifications · AgentOS",
+    };
+    if (titles[pathname]) document.title = titles[pathname];
+    else if (pathname.startsWith("/dashboard/workspace/")) document.title = "Chat · AgentOS";
+    else if (pathname.startsWith("/dashboard/workflows/")) document.title = "Run detail · AgentOS";
+    else if (pathname.startsWith("/dashboard/integrations/")) document.title = "Integration · AgentOS";
+    else if (pathname.startsWith("/dashboard")) document.title = "Dashboard · AgentOS";
   }, [pathname]);
 
   useEffect(() => {
@@ -156,8 +177,20 @@ function DashboardInner({ children }: { children: ReactNode }) {
     const load = async () => {
       try {
         const data = await listWorkflows(50);
-        setRecents((data.workflows || []).filter((wf) => !wf.parent_run_id));
-      } catch { /* ignore */ }
+        const workflows = data.workflows || [];
+        const byThread = new Map<string, WorkflowRun>();
+        for (const wf of workflows) {
+          const tid = wf.thread_id || wf.parent_run_id || wf.run_id;
+          const prev = byThread.get(tid);
+          if (!prev || String(wf.created_at || "") >= String(prev.created_at || "")) {
+            byThread.set(tid, wf);
+          }
+        }
+        setRecents([...byThread.values()]);
+        setRecentsError("");
+      } catch (err: unknown) {
+        setRecentsError(err instanceof Error ? err.message : "Could not load chats");
+      }
     };
     load();
     const interval = setInterval(load, 8000);
@@ -301,7 +334,10 @@ function DashboardInner({ children }: { children: ReactNode }) {
               <span className="truncate">{wf.goal}</span>
             </Link>
           ))}
-          {showLabels && recents.length === 0 && (
+          {showLabels && recentsError && recents.length === 0 && (
+            <div className="sidebar-empty" style={{ color: "var(--error)" }}>{recentsError}</div>
+          )}
+          {showLabels && !recentsError && recents.length === 0 && (
             <div className="sidebar-empty">No chats yet</div>
           )}
 

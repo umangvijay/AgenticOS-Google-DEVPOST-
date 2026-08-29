@@ -45,10 +45,13 @@ export default function BlogPage() {
     setSubmitting(true);
 
     try {
+      const stored = localStorage.getItem("agentos_auth");
+      const accessToken = stored ? JSON.parse(stored).accessToken : "";
       const response = await fetch("/api/blogs", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
         body: JSON.stringify({ title, category, excerpt }),
       });

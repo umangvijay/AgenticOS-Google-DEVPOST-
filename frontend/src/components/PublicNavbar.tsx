@@ -19,6 +19,28 @@ export default function PublicNavbar() {
   }, [pathname]);
 
   useEffect(() => {
+    const titles: Record<string, string> = {
+      "/": "Home · AgentOS",
+      "/about": "About · AgentOS",
+      "/features": "Features · AgentOS",
+      "/integrations": "Integrations · AgentOS",
+      "/docs": "Docs · AgentOS",
+      "/faq": "FAQs · AgentOS",
+      "/blog": "Blog · AgentOS",
+      "/contact": "Contact · AgentOS",
+      "/pricing": "Pricing · AgentOS",
+      "/community": "Community · AgentOS",
+      "/privacy": "Privacy · AgentOS",
+      "/terms": "Terms · AgentOS",
+      "/get-started": "Get started · AgentOS",
+      "/login": "Sign in · AgentOS",
+      "/signup": "Sign up · AgentOS",
+    };
+    if (titles[pathname]) document.title = titles[pathname];
+    else if (pathname.startsWith("/docs/")) document.title = "Docs · AgentOS";
+  }, [pathname]);
+
+  useEffect(() => {
     let lastY = 0;
     const onScroll = () => {
       const y = window.scrollY;

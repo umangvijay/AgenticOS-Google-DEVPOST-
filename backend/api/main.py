@@ -14,6 +14,7 @@ FastAPI application with:
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 import uuid
 import logging
@@ -59,6 +60,19 @@ app.add_middleware(
         "X-RateLimit-Reset", "Retry-After",
     ],
 )
+
+
+def _cors_headers_for(request: Request) -> dict:
+    """CORS on responses that never reach CORSMiddleware (middleware 403/500)."""
+    origin = request.headers.get("origin") or ""
+    if origin in settings.CORS_ALLOWED_ORIGINS:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type, X-CSRF-Token",
+            "Vary": "Origin",
+        }
+    return {}
 
 # ── Routers ───────────────────────────────────────────────────────
 from backend.api.routers import approvals
@@ -131,9 +145,23 @@ async def csrf_middleware(request: Request, call_next):
         return JSONResponse(
             status_code=exc.status_code,
             content={"detail": exc.detail},
+            headers=_cors_headers_for(request),
         )
-    response = await call_next(request)
-    return response
+    try:
+        return await call_next(request)
+    except StarletteHTTPException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=_cors_headers_for(request),
+        )
+    except Exception as exc:
+        logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": (str(exc) or "Internal server error")[:800]},
+            headers=_cors_headers_for(request),
+        )
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -243,6 +271,7 @@ async def health_check():
             if settings.GEMINI_API_KEY
             else ("vertex" if settings.GOOGLE_CLOUD_PROJECT else "unset")
         ),
+        "vertex_location": settings.GOOGLE_CLOUD_REGION,
         "factory_initialized": factory is not None and factory._initialized,
     }
 
@@ -256,6 +285,23 @@ async def get_csrf_token(request: Request):
     response = JSONResponse({"csrf_token": token})
     set_csrf_cookie(response, token)
     return response
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception(request: Request, exc: Exception):
+    """JSON errors with CORS headers so the browser can read them (not Failed to fetch)."""
+    if isinstance(exc, StarletteHTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=_cors_headers_for(request),
+        )
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": (str(exc) or "Internal server error")[:800]},
+        headers=_cors_headers_for(request),
+    )
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -303,21 +349,18 @@ async def process_goal(
         )
         from backend.agents.intent.intent_agent import get_intent_agent
         from backend.agents.planner.planner_agent import get_planner_agent
-        from backend.engine.dag_validator import validate_dag, enrich_plan_from_intent, DAGValidationError
-        from google.adk.runners import InMemoryRunner
-        from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+        from backend.engine.dag_validator import prepare_dag, enrich_plan_from_intent, DAGValidationError
+        from backend.services import gemini_client
+        from tenacity import retry, stop_after_attempt, wait_exponential
 
-        # Wrap runner execution with retries to handle 503 Overloaded errors
         @retry(
             stop=stop_after_attempt(3),
             wait=wait_exponential(multiplier=1, min=2, max=10),
             reraise=True
         )
-        async def run_with_retries(runner, input_data):
-            return await runner.run_debug(input_data)
+        async def run_with_retries(build_agent, input_data):
+            return await gemini_client.run_adk_debug(build_agent, input_data, settings.APP_NAME)
 
-
-        # Helper: extract text from ADK Event
         def extract_event_text(events):
             for event in reversed(events):
                 if event.output is not None:
@@ -330,10 +373,7 @@ async def process_goal(
                             return part.text
             return None
 
-        # 1. Intent — real-time AI analysis of the user's goal
-        intent_agent = get_intent_agent()
-        intent_runner = InMemoryRunner(agent=intent_agent, app_name=settings.APP_NAME)
-        intent_events = await run_with_retries(intent_runner, goal)
+        intent_events = await run_with_retries(lambda model: get_intent_agent(model=model), goal)
         raw_intent = extract_event_text(intent_events)
 
         if isinstance(raw_intent, dict):
@@ -345,12 +385,13 @@ async def process_goal(
 
         logger.info(f"[{run_id[:8]}] Intent: {intent_result}")
 
-        # 2. Plan — real-time workflow planning by AI, fed the user's live tool catalog
         tool_router = getattr(request.app.state, "tool_router", None)
         live_catalog = await tool_router.get_tool_catalog(user.user_id) if tool_router else []
-        planner_agent = get_planner_agent(catalog_json=json.dumps(live_catalog))
-        planner_runner = InMemoryRunner(agent=planner_agent, app_name=settings.APP_NAME)
-        plan_events = await run_with_retries(planner_runner, json.dumps(intent_result))
+        catalog_blob = json.dumps(live_catalog)
+        plan_events = await run_with_retries(
+            lambda model: get_planner_agent(catalog_json=catalog_blob, model=model),
+            json.dumps(intent_result),
+        )
         raw_plan = extract_event_text(plan_events)
 
         if isinstance(raw_plan, dict):
@@ -364,7 +405,7 @@ async def process_goal(
         logger.info(f"[{run_id[:8]}] DAG: {len(workflow_def.tasks)} tasks")
 
         # 3. Validate DAG
-        validate_dag(workflow_def)
+        prepare_dag(workflow_def)
 
         # 4. Create WorkflowRun with real user identity
         run = WorkflowRun(
@@ -384,7 +425,7 @@ async def process_goal(
                 tool=t_def.tool,
                 input_data=t_def.input_data,
                 dependencies=t_def.dependencies,
-                timeout_seconds=max(t_def.timeout_seconds, 180) if t_def.agent in ("Orchestrator", "core.mcp_build") else t_def.timeout_seconds,
+                timeout_seconds=max(t_def.timeout_seconds, 180) if t_def.agent in ("Orchestrator", "OrchestratorAgent", "core.mcp_build") or "orchestrator" in (t_def.agent or "").lower() else t_def.timeout_seconds,
                 max_retries=t_def.max_retries,
                 recovery_enabled=True,
                 status=TaskStatus.PENDING,
@@ -500,15 +541,33 @@ async def stream_workflow_events(
         raise HTTPException(status_code=403, detail="Access denied")
 
     async def event_generator():
-        """Poll-based SSE for SQLite mode."""
         last_event_id = None
-        while True:
-            if await request.is_disconnected():
-                break
-            events = await factory.workflow_repo.get_events(run_id, after_event_id=last_event_id)
-            for event in events:
-                last_event_id = event["event_id"]
-                yield f"id: {event['event_id']}\ndata: {json.dumps(event)}\n\n"
-            await asyncio.sleep(1)  # Poll interval
+        try:
+            yield ": connected\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    events = await factory.workflow_repo.get_events(run_id, after_event_id=last_event_id)
+                except Exception as exc:
+                    logger.exception("SSE get_events failed for run %s", run_id)
+                    yield f"event: error\ndata: {json.dumps({'error': str(exc)[:800]})}\n\n"
+                    return
+                for event in events:
+                    last_event_id = event.get("event_id")
+                    yield f"id: {last_event_id}\ndata: {json.dumps(event, default=str)}\n\n"
+                await asyncio.sleep(1)
+        except Exception as exc:
+            logger.exception("SSE stream failed for run %s", run_id)
+            yield f"event: error\ndata: {json.dumps({'error': str(exc)[:800]})}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            **_cors_headers_for(request),
+        },
+    )

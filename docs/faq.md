@@ -20,7 +20,7 @@ Shared Gemini quota can exhaust. Site health and spec-based MCP builds can still
 
 ## Contact mail did not arrive
 
-`/contact` emails `godumang35@gmail.com` only when `CONTACT_SMTP_PASSWORD` is a Gmail **App Password**. Your normal Gmail password is rejected by SMTP and must never be stored. Create one at [App Passwords](https://myaccount.google.com/apppasswords) (2-Step on), paste into project-root `.env`, send again. Privacy contact: privacy@agentos.gmail.com.
+`/contact` emails `godumang35@gmail.com` only when `CONTACT_SMTP_PASSWORD` is a Gmail **App Password**. If that secret is missing, the submission is stored and the UI says mail is not configured — it does not claim an email was sent. Privacy contact: godumang35@gmail.com.
 
 ## Can I put my Gmail password in `.env`?
 

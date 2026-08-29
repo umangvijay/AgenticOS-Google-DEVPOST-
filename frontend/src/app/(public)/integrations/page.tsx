@@ -1,6 +1,8 @@
 import PublicNavbar from "@/components/PublicNavbar";
 import Link from "next/link";
 
+export const metadata = { title: "Integrations" };
+
 const APPS = [
   { name: "JSONPlaceholder", use: "REST APIs from OpenAPI or a docs URL" },
   { name: "GitHub", use: "Repos, issues, and pull requests from a description" },

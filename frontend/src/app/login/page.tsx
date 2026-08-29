@@ -45,6 +45,10 @@ function LoginContent() {
   const isGuest = user?.role === "guest";
 
   useEffect(() => {
+    document.title = "Sign in · AgentOS";
+  }, []);
+
+  useEffect(() => {
     if (!isLoading && isAuthenticated && !isGuest) router.replace("/dashboard");
   }, [isAuthenticated, isLoading, isGuest, router]);
 

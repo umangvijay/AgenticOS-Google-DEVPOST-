@@ -47,30 +47,58 @@ def is_retryable_model_error(exc: BaseException) -> bool:
     )
 
 
-def _is_gemini_35_or_newer(model: str) -> bool:
-    """Keep Gemini 3.5+ only. Do not invent model IDs."""
+FLASH_MODELS = (
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash-lite",
+    "gemini-3.5-flash-lite",
+)
+
+
+def _is_allowed_flash(model: str) -> bool:
+    """Flash-tier Gemini 3.5 / 3.6 / 3.7 only. Never Pro or Reasoning."""
     name = (model or "").strip().lower()
-    if not name.startswith("gemini-"):
-        return True
-    rest = name[len("gemini-"):]
-    if rest.startswith("1.") or rest.startswith("2."):
-        return False
-    return True
+    return name in FLASH_MODELS
+
+
+def _is_gemini_35_or_newer(model: str) -> bool:
+    return _is_allowed_flash(model)
 
 
 def _candidate_models(preferred: Optional[str] = None) -> list:
     primary = preferred or settings.GEMINI_MODEL
-    extras = (
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-    )
     out = []
-    for model in (primary, *extras):
-        if model and model not in out and _is_gemini_35_or_newer(model):
+    for model in (primary, *FLASH_MODELS):
+        if model and model not in out and _is_allowed_flash(model):
             out.append(model)
-    if not out and primary:
-        out.append(primary)
+    if not out:
+        out.extend(FLASH_MODELS)
     return out
+
+
+def candidate_models(preferred: Optional[str] = None) -> list:
+    """Flash 3.5 / 3.6 / 3.7 IDs to try when Vertex 404s a publisher model."""
+    return _candidate_models(preferred)
+
+
+async def run_adk_debug(build_agent, prompt: str, app_name: Optional[str] = None):
+    """Run an ADK InMemoryRunner, retrying Flash model IDs on NOT_FOUND / quota."""
+    from google.adk.runners import InMemoryRunner
+
+    last: Optional[Exception] = None
+    for model in _candidate_models():
+        try:
+            agent = build_agent(model)
+            runner = InMemoryRunner(agent=agent, app_name=app_name or settings.APP_NAME)
+            return await runner.run_debug(prompt)
+        except Exception as e:
+            last = e
+            if is_retryable_model_error(e):
+                logger.warning("ADK Gemini %s unavailable (%s); trying next Flash model", model, e)
+                continue
+            raise
+    raise last or RuntimeError("ADK runner produced no events")
 
 
 def _client():
@@ -258,40 +286,50 @@ async def describe_image(image_bytes: bytes, mime: str = "image/jpeg", name: str
     """Describe an attached photo so the planner can use it."""
     from google.genai import types
 
-    try:
-        client = _client()
-        part = None
-        if hasattr(types.Part, "from_bytes"):
-            part = types.Part.from_bytes(data=image_bytes, mime_type=mime or "image/jpeg")
-        else:
-            part = types.Part(inline_data=types.Blob(data=image_bytes, mime_type=mime or "image/jpeg"))
-        response = await _generate_content_async(
-            client,
-            model=settings.GEMINI_MODEL,
-            contents=[
-                part,
-                (
-                    f"Describe this attached photo ({name}) for an automation agent. "
-                    "Extract visible text, UI labels, URLs, tables, and what the user likely wants done."
+    part = None
+    if hasattr(types.Part, "from_bytes"):
+        part = types.Part.from_bytes(data=image_bytes, mime_type=mime or "image/jpeg")
+    else:
+        part = types.Part(inline_data=types.Blob(data=image_bytes, mime_type=mime or "image/jpeg"))
+    contents = [
+        part,
+        (
+            f"Describe this attached photo ({name}) for an automation agent. "
+            "Extract visible text, UI labels, URLs, tables, and what the user likely wants done."
+        ),
+    ]
+    last: Optional[Exception] = None
+    for candidate in _candidate_models():
+        try:
+            client = _client()
+            response = await _generate_content_async(
+                client,
+                model=candidate,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                 ),
-            ],
-            config=types.GenerateContentConfig(
-                temperature=0.2,
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-            ),
-        )
-    except Exception as e:
-        if is_quota_error(e):
-            try:
-                return await _grok_complete(
-                    f"Describe this attached photo ({name}) for an automation agent from the filename and mime type {mime}. "
-                    "The image bytes could not be sent to Gemini. Say that a photo was attached and what the user likely wants.",
-                    json_mode=False,
-                )
-            except Exception:
-                raise GeminiQuotaExceeded(
-                    "Gemini quota exhausted. Add your own key in Settings."
-                ) from e
+            )
+            return (response.text or f"A photo named {name} was attached.").strip()
+        except Exception as e:
+            last = e
+            if is_retryable_model_error(e):
+                logger.warning("Image describe Gemini %s unavailable (%s)", candidate, e)
+                continue
+            break
+    e = last
+    if e and is_quota_error(e):
+        try:
+            return await _grok_complete(
+                f"Describe this attached photo ({name}) for an automation agent from the filename and mime type {mime}. "
+                "The image bytes could not be sent to Gemini. Say that a photo was attached and what the user likely wants.",
+                json_mode=False,
+            )
+        except Exception:
+            raise GeminiQuotaExceeded(
+                "Gemini quota exhausted. Add your own key in Settings."
+            ) from e
+    if e:
         logger.warning("Image describe failed: %s", e)
-        return f"A photo named {name} was attached."
-    return (response.text or f"A photo named {name} was attached.").strip()
+    return f"A photo named {name} was attached."

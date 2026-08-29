@@ -48,12 +48,16 @@ def set_csrf_cookie(response: Response, token: Optional[str] = None) -> str:
     Returns the token value.
     """
     token = token or generate_csrf_token()
+    # Cross-origin SPA (frontend host ≠ API host): the browser will only attach
+    # this cookie on credentialed fetches if SameSite=None and Secure.
+    # Localhost frontend+API share a site, so Lax is enough there.
+    cross_site = settings.APP_ENV != "development"
     response.set_cookie(
         key=CSRF_COOKIE_NAME,
         value=token,
-        httponly=False,      # Must be readable by JS to send in header
-        samesite="lax",
-        secure=settings.APP_ENV != "development",
+        httponly=True,  # JS reads the token from /csrf-token JSON, not document.cookie
+        samesite="none" if cross_site else "lax",
+        secure=cross_site,
         max_age=3600 * 24,   # 24 hours
         path="/",
     )

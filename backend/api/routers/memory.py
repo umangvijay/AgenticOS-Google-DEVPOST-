@@ -7,6 +7,7 @@ POST /api/v1/memory/search      — Semantic search
 DELETE /api/v1/memory/{id}      — Delete a memory entry
 """
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Request, Depends, status
@@ -53,20 +54,13 @@ async def add_memory(
     except InputValidationError as e:
         raise HTTPException(status_code=400, detail=e.message)
 
-    # Generate embedding using Gemini
     embedding = None
     try:
-        from google import genai
-        from backend.config.settings import settings
-        client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        embed_result = client.models.embed_content(
-            model=settings.GEMINI_EMBEDDING_MODEL,
-            contents=content,
-        )
-        if embed_result and embed_result.embeddings:
-            embedding = embed_result.embeddings[0].values
+        from backend.services.embedding_service import GoogleCloudEmbeddingService
+        embedding = await asyncio.to_thread(GoogleCloudEmbeddingService().embed_text, content)
     except Exception as e:
-        logger.warning(f"Embedding generation failed: {e}")
+        logger.exception("Embedding generation failed")
+        raise HTTPException(status_code=500, detail=f"Embedding service unavailable: {e}") from e
 
     metadata = dict(body.metadata or {})
     if body.tags:
@@ -92,12 +86,22 @@ async def list_memories(
 ):
     """List memory entries for the current user."""
     factory = _get_factory(request)
-    memories = await factory.memory_repo.list_memories(
-        user_id=user.user_id,
-        memory_type=memory_type,
-        limit=limit,
-        offset=offset,
-    )
+    lister = getattr(factory.memory_repo, "list_memories", None)
+    if not callable(lister):
+        raise HTTPException(
+            status_code=500,
+            detail="Memory listing is not available on this storage backend.",
+        )
+    try:
+        memories = await lister(
+            user_id=user.user_id,
+            memory_type=memory_type,
+            limit=limit,
+            offset=offset,
+        )
+    except Exception as e:
+        logger.exception("list_memories failed")
+        raise HTTPException(status_code=500, detail=f"Could not list memories: {e}") from e
     return {"memories": memories, "count": len(memories)}
 
 
@@ -114,21 +118,13 @@ async def search_memory(
     except InputValidationError as e:
         raise HTTPException(status_code=400, detail=e.message)
 
-    # Generate query embedding
     query_embedding = None
     try:
-        from google import genai
-        from backend.config.settings import settings
-        client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        embed_result = client.models.embed_content(
-            model=settings.GEMINI_EMBEDDING_MODEL,
-            contents=query,
-        )
-        if embed_result and embed_result.embeddings:
-            query_embedding = embed_result.embeddings[0].values
+        from backend.services.embedding_service import GoogleCloudEmbeddingService
+        query_embedding = await asyncio.to_thread(GoogleCloudEmbeddingService().embed_text, query)
     except Exception as e:
-        logger.warning(f"Query embedding failed: {e}")
-        raise HTTPException(status_code=500, detail="Embedding service unavailable")
+        logger.exception("Query embedding failed")
+        raise HTTPException(status_code=500, detail=f"Embedding service unavailable: {e}") from e
 
     results = await factory.memory_repo.search_memory(
         user_id=user.user_id,

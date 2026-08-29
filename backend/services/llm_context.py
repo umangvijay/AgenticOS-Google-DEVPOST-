@@ -34,7 +34,11 @@ def effective_grok_key() -> Optional[str]:
 
 
 def gemini_adk_kwargs() -> Dict[str, Any]:
-    """Client kwargs for ADK Gemini so BYOK vault keys reach planner/orchestrator."""
+    """Client kwargs for ADK Gemini so BYOK vault keys reach planner/orchestrator.
+
+    Vertex location is always settings.GOOGLE_CLOUD_REGION (GOOGLE_CLOUD_REGION env).
+    Do not hardcode us-central1 or any other region here.
+    """
     key = effective_gemini_key()
     if key:
         return {"api_key": key}
@@ -43,6 +47,20 @@ def gemini_adk_kwargs() -> Dict[str, Any]:
         "project": settings.GOOGLE_CLOUD_PROJECT,
         "location": settings.GOOGLE_CLOUD_REGION,
     }
+
+
+def adk_gemini(model: Optional[str] = None, *, tools: Optional[list] = None):
+    """ADK Gemini using Flash-tier IDs only (same fallback chain as gemini_client)."""
+    from google.adk.models.google_llm import Gemini
+    from backend.services.gemini_client import candidate_models
+
+    kwargs: Dict[str, Any] = {
+        "model": candidate_models(model)[0],
+        "client_kwargs": gemini_adk_kwargs(),
+    }
+    if tools is not None:
+        kwargs["tools"] = tools
+    return Gemini(**kwargs)
 
 
 async def _load_named_key(secrets_repo, user_id: str, name: str, fields: tuple) -> Optional[str]:
