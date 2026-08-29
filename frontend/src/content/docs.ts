@@ -252,21 +252,21 @@ export const DOC_PAGES: {
   {
     slug: "deploy-gcp",
     title: "Google Cloud",
-    blurb: "Optional Cloud Run hosting with $150 credits: scale to zero, Secret Manager, no .env in the image.",
-    diagram: ["gcloud", "Secret Manager", "Cloud Run", "Firestore optional"],
+    blurb: "Cloud Run + Vertex Gemini on your $150 credits, with a $100 kill switch that unlinks billing.",
+    diagram: ["Redeem credits", "Vertex (no API key)", "Cloud Run", "$100 kill switch"],
     image: "/docs/api.svg",
     sections: [
       {
-        h: "Credits",
-        p: "Deploy the API with min instances 0 so idle time does not drain a new-account credit grant. An always-on worker will.",
+        h: "Credits and Vertex",
+        p: "Redeem the code on the billing account, link one project, leave GEMINI_API_KEY empty so AgentOS uses Vertex AI on that project (higher RPM/TPM, paid from the grant). Do not paste an AI Studio key on Cloud Run if you want Vertex quotas.",
       },
       {
-        h: "Secrets",
-        p: "GEMINI_API_KEY, CONTACT_SMTP_PASSWORD (App Password only), and SECRETS_MASTER_KEY go in Secret Manager. Docker never copies .env.",
+        h: "Kill switch at $100",
+        p: "Google has no hard cap. A budget at $100 (exclude credits = gross usage) publishes to Pub/Sub; a Cloud Function sets Cloud Run to zero instances and unlinks billing. Notifications can lag — the leftover $50 of $150 is the buffer. scripts/gcp-killswitch/ and docs/deploy-gcp.md.",
       },
       {
-        h: "Data",
-        p: "SQLite on Cloud Run disappears when the instance scales to zero. Set STORAGE_BACKEND=firestore for durable users and runs. Commands: docs/deploy-gcp.md in the repo.",
+        h: "Data and secrets",
+        p: "SQLite on Cloud Run disappears at scale-to-zero; use Firestore for a durable demo. SECRETS_MASTER_KEY in Secret Manager. Docker never copies .env.",
       },
     ],
   },

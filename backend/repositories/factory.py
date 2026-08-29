@@ -55,23 +55,7 @@ class RepositoryFactory:
         logger.info(f"Initializing repositories with backend: {backend}")
 
         if backend == "firestore":
-            from backend.repositories.firestore.database import FirestoreDB
-            # We don't necessarily need to "init" Firestore like SQLite,
-            # but we can call get_client to ensure it connects.
-            await FirestoreDB.get_client()
-            
-            from backend.repositories.firestore.user_repository import FirestoreUserRepository
-            from backend.repositories.firestore.workflow_repository import FirestoreWorkflowRepository
-            from backend.repositories.firestore.mcp_repository import FirestoreMCPRepository
-            from backend.repositories.firestore.idempotency_repository import FirestoreIdempotencyRepository
-            from backend.repositories.firestore.memory_repository import FirestoreMemoryRepository
-            
-            self.user_repo = FirestoreUserRepository()
-            self.workflow_repo = FirestoreWorkflowRepository()
-            self.mcp_repo = FirestoreMCPRepository()
-            self.idempotency_repo = FirestoreIdempotencyRepository()
-            self.memory_repo = FirestoreMemoryRepository()
-            
+            await self._init_firestore()
         elif backend == "sqlite":
             await self._init_sqlite()
         else:
@@ -143,15 +127,22 @@ class RepositoryFactory:
         self.idempotency_repo = FirestoreIdempotencyRepository()
         self.memory_repo = FirestoreMemoryRepository()
 
-        # TODO: Implement other repositories for Firestore 
-        # self.secrets_repo = SecretManagerSecretsRepository()
-        # self.schedule_repo = FirestoreScheduleRepository()
-        # self.refresh_token_repo = FirestoreRefreshTokenRepository()
-        # self.notification_repo = FirestoreNotificationRepository()
-        # self.settings_repo = FirestoreSettingsRepository()
-        # self.audit_repo = FirestoreAuditRepository()
+        from backend.repositories.firestore.sidecar import (
+            FirestoreAuditRepository,
+            FirestoreNotificationRepository,
+            FirestoreRefreshTokenRepository,
+            FirestoreScheduleRepository,
+            FirestoreSecretsRepository,
+            FirestoreSettingsRepository,
+        )
+        self.secrets_repo = FirestoreSecretsRepository()
+        self.schedule_repo = FirestoreScheduleRepository()
+        self.refresh_token_repo = FirestoreRefreshTokenRepository()
+        self.notification_repo = FirestoreNotificationRepository()
+        self.settings_repo = FirestoreSettingsRepository()
+        self.audit_repo = FirestoreAuditRepository()
 
-        # Pub/Sub message bus for cloud mode
+        # Pub/Sub message bus for cloud mode; in-process if Pub/Sub is not set up.
         try:
             self.message_bus = PubSubMessageBus()
         except Exception:

@@ -46,7 +46,16 @@ class JWTManager:
         self._initialized = False
 
     def initialize(self) -> None:
-        """Load or generate RSA keypair."""
+        """Load PEM from env (Cloud Run), disk, or generate once."""
+        pem_priv = (settings.JWT_PRIVATE_KEY or "").strip()
+        pem_pub = (settings.JWT_PUBLIC_KEY or "").strip()
+        if pem_priv and pem_pub:
+            self._private_key = pem_priv.encode("utf-8")
+            self._public_key = pem_pub.encode("utf-8")
+            logger.info("JWT keys loaded from environment")
+            self._initialized = True
+            return
+
         priv_path = Path(settings.JWT_PRIVATE_KEY_PATH)
         pub_path = Path(settings.JWT_PUBLIC_KEY_PATH)
 

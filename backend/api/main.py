@@ -213,6 +213,11 @@ async def health_check():
         "version": "2.0.0",
         "storage": settings.STORAGE_BACKEND,
         "model": settings.GEMINI_MODEL,
+        "llm": (
+            "api_key"
+            if settings.GEMINI_API_KEY
+            else ("vertex" if settings.GOOGLE_CLOUD_PROJECT else "unset")
+        ),
         "factory_initialized": factory is not None and factory._initialized,
     }
 

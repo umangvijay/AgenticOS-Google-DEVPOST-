@@ -80,13 +80,14 @@ def validate_environment(logger) -> bool:
     """Validate required environment variables and dependencies."""
     errors = []
 
-    gemini = os.environ.get("GEMINI_API_KEY", "")
-    grok = os.environ.get("XAI_API_KEY", "")
-    if (not gemini or len(gemini) < 10) and (not grok or len(grok) < 8):
+    gemini = os.environ.get("GEMINI_API_KEY", "").strip()
+    grok = os.environ.get("XAI_API_KEY", "").strip()
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
+    vertex_ok = bool(project) and not project.lower().startswith("your-")
+    if (not gemini or len(gemini) < 10) and (not grok or len(grok) < 8) and not vertex_ok:
         errors.append(
-            "GEMINI_API_KEY is missing or invalid (and no XAI_API_KEY fallback).\n"
-            "   Get a Gemini key at: https://aistudio.google.com/apikey\n"
-            "   Then add to .env: GEMINI_API_KEY=your_key_here"
+            "Set GEMINI_API_KEY in .env for local AI Studio, or GOOGLE_CLOUD_PROJECT "
+            "(and ADC / Cloud Run SA) to use Vertex Gemini. Optional: XAI_API_KEY."
         )
 
     # Check Python

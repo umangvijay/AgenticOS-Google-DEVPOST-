@@ -53,7 +53,9 @@ class SecretsVault:
         """Load or auto-generate the master key."""
         self._master_key = settings.SECRETS_MASTER_KEY
         
-        self.use_gcp = settings.STORAGE_BACKEND.lower() == "firestore"
+        self.use_gcp = os.environ.get("VAULT_USE_SECRET_MANAGER", "").lower() in (
+            "1", "true", "yes",
+        )
         if self.use_gcp:
             from backend.security.gcp_secret_manager import GCPSecretManager
             self.gcp_client = GCPSecretManager()

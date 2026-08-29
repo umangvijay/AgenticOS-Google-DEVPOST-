@@ -2,117 +2,170 @@
 
 **Tell it what you want. It builds the tools and does the work.**
 
-AgentOS is an autonomous AI workspace. You give a high-level goal. A planner turns it into a DAG of tasks. If a required integration is missing, the MCP factory builds it — HTTP tools from an OpenAPI spec, HTTP tools sketched from a description when there is no spec, or origin-locked browser tools when the target is a website with no public API. The factory probes the tools, registers them, and the orchestrator continues in the same run (or the next message in the thread).
+AgentOS is an autonomous AI workspace. You describe an outcome in plain language. A planner turns that into a DAG of tasks. If the tools needed to finish the work do not exist yet, the MCP factory **builds them**, probes them live, registers them, and the orchestrator continues in the same run.
 
-Resume generation, self-healing retries, a vault, and an action timeline are features of that workspace — not the whole product.
+It is not a chatbot with canned replies. Runs hit live HTTP APIs, a real browser, site health checks, an encrypted vault, resume generation, and an action timeline of what the agents actually did.
 
-**Local default:** Next.js on port 3000, FastAPI on port 8000, SQLite. Google Cloud (Cloud Run, Secret Manager, optional Firestore) is how you *host* it, not what you need on a laptop.
+**Stack:** Next.js (port 3000) · FastAPI (port 8000) · SQLite locally · Firestore on Cloud Run · Gemini (AI Studio key locally, or Vertex on GCP).
 
-Source: [github.com/umangvijay/AgenticOS-Google-DEVPOST-](https://github.com/umangvijay/AgenticOS-Google-DEVPOST-)
+## Local and cloud
 
-## What it can do
+The same codebase runs in both places. One setting switches storage; Gemini follows the key.
 
-- **Dynamic MCP builder** — OpenAPI URL, pasted spec, natural-language prompt for any HTTP API, or a website with no API (Playwright tools on a locked origin). Not a reverse-engineered private API.
-- **Autonomous orchestration** — planner = task decomposition. Core nodes (HTTP, health, chat) do not need a model. The orchestrator uses the live tool catalog.
-- **Self-healing** — timeouts, network errors, and 429/quota are retried. CAPTCHA / OTP / MFA are **not** retried as failures: the run **pauses** for you.
-- **Human-in-the-loop challenges** — AgentOS never fills CAPTCHA, SMS OTP, or MFA. It opens a visible browser when it can, you complete the check, then **Resume**.
-- **Vault** — AES-256-GCM credentials. The API never returns values after save.
-- **Resume** — scan vs a job description, tailor from notes, HTML preview/download.
-- **Action timeline** — workspace shows the events the agents actually emitted.
-- **Contact** — SMTP with a **Gmail App Password** (not your Gmail login password) to `godumang35@gmail.com`.
+| | Laptop | Google Cloud |
+| --- | --- | --- |
+| How | `python main.py` + `npm run dev` | Cloud Run (`docs/deploy-gcp.md`) |
+| Storage | `STORAGE_BACKEND=sqlite` | `STORAGE_BACKEND=firestore` |
+| Gemini | `GEMINI_API_KEY` (AI Studio) | Leave the key empty; Vertex uses `GOOGLE_CLOUD_PROJECT` + the Cloud Run service account |
+| Secrets | `.env` (gitignored) | Secret Manager |
+| Data | `data/agentos.db` | Firestore (survives scale-to-zero) |
 
-## How MCP tools work from chat
+Repository: [umangvijay/AgenticOS-Google-DEVPOST-](https://github.com/umangvijay/AgenticOS-Google-DEVPOST-)
 
-Open [http://localhost:3000/dashboard](http://localhost:3000/dashboard). Chips under the composer send these same goals. The same three tabs exist on **Integrations → Create**.
+## Features
 
-| You have | You type in chat | What gets built |
+- **Dynamic MCP factory** — three ways to get tools: an OpenAPI URL, a description of any HTTP API with no spec, or a website with no API (origin-locked Playwright tools). Not a reverse-engineered private API.
+- **Chat-first automation** — workspace chat plans, builds missing integrations mid-run, then calls the new tools. Follow-up messages reuse the catalog.
+- **Orchestrator + DAG engine** — planner *is* the decomposer. Core nodes (HTTP, health, chat) run without a model.
+- **Self-healing** — timeouts, network errors, and 429/quota retry. CAPTCHA, OTP, and MFA pause for you instead of being treated as failures.
+- **Human-in-the-loop** — AgentOS never fills CAPTCHA, SMS OTP, or MFA. Complete the check, then Resume.
+- **Vault** — AES-256-GCM credentials. After save, the API returns names only.
+- **ATS resume** — scan against a job description, tailor from notes, HTML preview and download.
+- **Studio** — site health, debug (code is not executed), generate a downloadable site or app.
+- **Action timeline** — SSE events from the live run, not a fake progress bar.
+- **Guest workspace** — try the product without creating an account first.
+
+### MCP from chat
+
+| You have | You type | What gets built |
 | --- | --- | --- |
 | OpenAPI URL | `Create MCP tools from https://…/openapi.json then list …` | HTTP tools from the spec, live-probed, then called |
-| HTTP API, no spec | `Build MCP tools for [app] so I can [list / get / create …]` | HTTP tools against the public API (GitHub, Open-Meteo, PokeAPI, …) |
-| Website, no API | Vault → save e.g. `bharatenglish` (username/email + password). Then `Create MCP tools for https://…`. Then `Log in with vault credential bharatenglish and open home / use runOnSite …` | Origin-locked browser tools (`runOnSite`, `login`, …). CAPTCHA/OTP/MFA pause for you. |
+| HTTP API, no spec | `Build MCP tools for [app] so I can [list / get / create …]` | HTTP tools on the public host (GitHub, Open-Meteo, PokeAPI, …) |
+| Website, no API | Vault login, then `Create MCP tools for https://…`, then `Log in with vault credential NAME and use runOnSite …` | Browser tools (`runOnSite`, `login`, …) locked to that origin |
 
-Follow-up messages in the same thread reuse the catalog. Vault lists **names only** after save.
+Same three paths exist on **Integrations → Create**.
 
-## Quick start (laptop)
+## Architecture
+
+Next.js is the workspace UI. FastAPI owns auth, the vault, the MCP registry, and the workflow engine. The engine plans a DAG, the MCP factory fills gaps, and Playwright runs only on a locked origin.
+
+```mermaid
+flowchart TD
+  user[You] --> ui[Next.js workspace]
+  ui -->|REST SSE cookies| api[FastAPI]
+  api --> auth[JWT RS256]
+  api --> vault[AES-GCM vault]
+  api --> engine[Workflow engine]
+  engine --> sqlite[(SQLite)]
+  engine --> planner[Planner]
+  planner --> dag[Task DAG]
+  dag --> core[Core nodes: HTTP health chat]
+  dag --> orch[Orchestrator]
+  orch --> catalog[MCP catalog]
+  catalog -->|missing| factory[MCP factory]
+  factory --> httpMcp[HTTP tools]
+  factory --> webMcp[Website Playwright tools]
+  orch --> webAgent[WebAgent]
+  webAgent -->|CAPTCHA OTP MFA| hitl[Pause for you]
+  engine --> sse[SSE timeline]
+  sse --> ui
+```
+
+## Flowchart
+
+What happens after you send a goal.
+
+```mermaid
+flowchart TD
+  goal[Goal in chat] --> intent{Direct plan?}
+  intent -->|health or GET| coreNow[core.health / core.http]
+  intent -->|needs tools or reasoning| plan[Planner builds DAG]
+  plan --> exists{Catalog already has a tool?}
+  exists -->|yes| run[Orchestrator calls it]
+  exists -->|no| kind{What did you provide?}
+  kind -->|OpenAPI URL| spec[Fetch and normalize spec]
+  kind -->|HTTP API no spec| sketch[Sketch or generate OpenAPI]
+  kind -->|Website no API| browser[Plan origin-locked browser tools]
+  spec --> probe[Live GET probe]
+  sketch --> probe
+  browser --> register[Register MCP]
+  probe --> register
+  register --> run
+  coreNow --> out[Result + timeline]
+  run --> challenge{Auth wall?}
+  challenge -->|CAPTCHA OTP MFA| pause[WAITING_APPROVAL]
+  pause --> you[You complete check]
+  you --> resume[Resume]
+  resume --> run
+  challenge -->|no| out
+```
+
+## Data flow
+
+```mermaid
+sequenceDiagram
+  participant You
+  participant UI as Next.js
+  participant API as FastAPI
+  participant DB as SQLite
+  participant P as Planner
+  participant F as MCP factory
+  participant X as Executor
+  participant W as WebAgent
+
+  You->>UI: High-level goal
+  UI->>API: POST /api/v1/workflows
+  API->>DB: Persist run and tasks
+  API->>P: Build DAG
+  alt Integration missing
+    P->>F: url / prompt / website
+    F->>F: Probe or lock origin
+    F->>DB: Register tools
+  end
+  P->>X: Execute nodes
+  alt HTTP API
+    X-->>API: Live JSON
+  else Website
+    X->>W: Playwright on locked origin
+    W-->>API: Page result or HITL pause
+  end
+  API-->>UI: SSE events
+  UI-->>You: Timeline and deliverable
+```
+
+Local stores: `data/agentos.db` (users, runs, tasks, MCP registry), vault ciphertext in SQLite, JWT keys under `backend/security/keys/` (gitignored). Optional cloud persistence is Firestore — see [docs/architecture.md](docs/architecture.md).
+
+## Quick start
 
 ```bash
 cd "AgenticOS(Google DEVPOST)"
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
-cp .env.example .env   # add GEMINI_API_KEY; optional CONTACT_SMTP_PASSWORD
+cp .env.example .env   # set GEMINI_API_KEY
 .venv/bin/python main.py
 cd frontend && npm install && npm run dev
 ```
 
 - App: http://localhost:3000
 - API: http://127.0.0.1:8000
-- OpenAPI: http://127.0.0.1:8000/docs
+- In-app docs: http://localhost:3000/docs
 
-`main.py` starts FastAPI and can start the Next.js app. Do not kill whatever is already listening on 3000/8000 if the health check is green.
+Copy `.env.example` to `.env`. Set `GEMINI_API_KEY` for local. Do not commit `.env`. Cloud Run + Vertex + the $100 kill switch: [docs/deploy-gcp.md](docs/deploy-gcp.md).
 
-### Contact mail (Gmail App Password — never your login password)
-
-Gmail **will reject** your normal mailbox password for SMTP. Putting that password in `.env` is also unsafe: it unlocks the whole Google account.
-
-1. Turn on [2-Step Verification](https://myaccount.google.com/signinoptions/two-step-verification).
-2. Create a 16-character [App Password](https://myaccount.google.com/apppasswords).
-3. Put it only in the **project-root** `.env` (next to this README):
-
-```
-CONTACT_TO_EMAIL=godumang35@gmail.com
-CONTACT_SMTP_HOST=smtp.gmail.com
-CONTACT_SMTP_PORT=587
-CONTACT_SMTP_USERNAME=godumang35@gmail.com
-CONTACT_SMTP_PASSWORD=your-16-char-app-password
-```
-
-Spaces in the App Password are stripped. `.env` is gitignored and is **never** committed. Save the file and send again from `/contact` — no restart required. On Google Cloud, store the same value in Secret Manager, not in the image.
-
-## Deploy on Google Cloud (~$150 credits)
-
-See **[docs/deploy-gcp.md](docs/deploy-gcp.md)** for the full path (billing, Secret Manager, Cloud Run, optional Terraform).
-
-Short version:
-
-- Use **Cloud Run** (scale to zero) so idle time does not burn the credit grant.
-- Put `GEMINI_API_KEY`, `CONTACT_SMTP_PASSWORD`, and `SECRETS_MASTER_KEY` in **Secret Manager**. Never bake `.env` into Docker.
-- Laptop SQLite is ephemeral on Cloud Run. For durable users/runs, set `STORAGE_BACKEND=firestore`.
-- Keep Cloud Run **min instances = 0**. An always-on worker will drain credits.
-
-This repo is not deployed to your GCP project until **you** run those commands while logged in (`gcloud auth login`).
-
-## Documentation
+## Docs
 
 - [Architecture](docs/architecture.md)
-- [Security](docs/SECURITY.md)
 - [MCP builder](docs/mcp-builder.md)
 - [Automation](docs/automation.md)
 - [User guide](docs/user-guide.md)
-- [Google Cloud deploy](docs/deploy-gcp.md)
+- [Security](docs/SECURITY.md)
 - [Environment setup](docs/environment-setup.md)
+- [Google Cloud deploy](docs/deploy-gcp.md) — redeem credits, Vertex Gemini (no API key), Cloud Run, **$100 kill switch**
 - [Diagrams](docs/diagrams/)
-- In-app docs: http://localhost:3000/docs
-
-## Security (summary)
-
-| Control | Mechanism |
-| --- | --- |
-| Account passwords | bcrypt cost 12; optional HMAC `PASSWORD_PEPPER`; 5-fail / 15-min lockout |
-| Vault secrets | AES-256-GCM, PBKDF2-SHA256 480k iterations |
-| Sessions | JWT RS256, CSRF cookie, rate limits |
-| HTTP tools | SSRF blocks on private/loopback hosts |
-| Browser tools | Origin / registrable-domain lock; secrets as `{{secret:…}}` placeholders |
-| Auth walls | HITL pause for CAPTCHA / OTP / MFA — no solving or bypass |
-| Contact SMTP | Gmail App Password in gitignored `.env` or Secret Manager — never the mailbox password |
-| Cloud secrets | Secret Manager on Cloud Run; `.env` is not in git |
-
-Argon2id is a future option for *new* password hashes; this tree keeps bcrypt so existing accounts still log in.
 
 ## Honest limits
 
 - Website MCP is **UI automation**, not a hidden official API.
-- Stripe live charges and other paid APIs need your own keys in the Vault.
 - CAPTCHA, SMS OTP, and bank MFA require you. AgentOS will not complete them for you.
-- Contact mail does not send until `CONTACT_SMTP_PASSWORD` is a valid App Password.
-- Cloud Run with SQLite loses data when instances recycle. Use Firestore for production persistence.
+- Paid APIs (for example live Stripe charges) need your own keys in the vault.
