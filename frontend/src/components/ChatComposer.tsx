@@ -6,9 +6,9 @@ import { useRouter } from "next/navigation";
 import { submitGoal, GoalAttachment } from "@/lib/api";
 
 const SUGGESTIONS = [
-  { label: "Check site health", goal: "Check the health of https://example.com" },
-  { label: "Build MCP tools", goal: "Build MCP tools for the GitHub REST API so I can list public repositories and issues" },
-  { label: "Fetch a live API", goal: "GET https://httpbin.org/json" },
+  { label: "OpenAPI MCP", goal: "Create MCP tools from https://raw.githubusercontent.com/PokeAPI/pokeapi/master/openapi.yml then list pokemon" },
+  { label: "HTTP API MCP", goal: "Build MCP tools for GitHub so I can list public events, then list them" },
+  { label: "Website MCP", goal: "Create MCP tools for https://example.com then open home and summarize the page" },
 ];
 
 const TEXT_TYPES = [

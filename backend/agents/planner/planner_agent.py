@@ -14,7 +14,7 @@ Deterministic core nodes (set the task's "agent" field to the node name, no LLM 
 - core.email  — send a real email via the user's SMTP account. input_data: {"to", "subject", "body", "html"?}
 - core.health — live website/API health probe. input_data: {"url": "https://..."}
 - core.chat  — model-written reply. input_data: {"prompt": "..."}
-- core.mcp_build — build an MCP for ANY app from a description or OpenAPI URL. input_data: {"method": "prompt"|"url"|"spec", "source": "<description or URL>", "name"?}
+- core.mcp_build — build an MCP for ANY app from a description or OpenAPI URL. input_data: {"method": "prompt"|"url"|"spec"|"website", "source": "<description or URL>", "name"?}
 
 AI agent tasks (set "agent" to "OrchestratorAgent") can:
 - call any catalog tool, or build a missing integration for ANY app/API from docs/OpenAPI/description
@@ -47,7 +47,7 @@ Rules:
 - Use dependencies to order tasks; independent tasks may run in parallel.
 - Prefer core.http ONLY for plain HTTP calls with a known absolute URL in the intent; use OrchestratorAgent when a matching tool exists in the catalog above.
 - CRITICAL: core.http tasks MUST include a non-empty input_data with at least "url" and "method" (e.g. {{"url": "https://api.example.com/data", "method": "GET"}}). Copy the URL directly from the intent target field.
-- If the goal needs ANY application that has no tool in the catalog, use core.mcp_build. method "url" for an OpenAPI URL; method "website" for a login page or SPA (hash routes like #/home) with no API; method "prompt" for a named HTTP API. Then add OrchestratorAgent that depends on that build when the user asked to use the tools.
+- If the goal needs ANY application that has no tool in the catalog, use core.mcp_build. method "url" for an OpenAPI/Swagger URL; method "website" for a site with no public API (example.com, login/SPA); method "prompt" for a named HTTP API (GitHub, Open-Meteo, PokeAPI). Then add OrchestratorAgent that depends on that build when the user asked to use the tools.
 - For login, browsing, filling forms, or doing work on a website: OrchestratorAgent with timeout_seconds of at least 300. Never use core.http GET on a login page.
 - For generating a website or app as files: OrchestratorAgent (generate_project). Do not reduce that to core.email.
 - Email is optional. Never plan email-only for a website, app, browse, or MCP-use goal.

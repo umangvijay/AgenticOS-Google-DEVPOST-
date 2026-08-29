@@ -66,6 +66,8 @@ export default function VaultPage() {
       <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Vault</h1>
       <p style={{ color: "var(--text-secondary)", marginBottom: 24 }}>
         Encrypted with AES-256-GCM. Agents see placeholders like {"{{secret:password}}"} — never the raw value.
+        For a site login, save a short name (e.g. <code>bharatenglish</code>) with username/email + password, then in chat:
+        create MCP tools for the site URL, then “Log in with vault credential bharatenglish and open home / use runOnSite”.
       </p>
 
       <div style={{ display: "grid", gap: 24, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
@@ -74,7 +76,7 @@ export default function VaultPage() {
           {error && <div style={{ marginBottom: 12, color: "var(--error)", fontSize: 14 }}>{error}</div>}
           {info && <div style={{ marginBottom: 12, color: "var(--success)", fontSize: 14 }}>{info}</div>}
           <label style={{ display: "block", fontSize: 13, marginBottom: 6, color: "var(--text-secondary)" }}>Name</label>
-          <input className="input" required value={name} onChange={(e) => setName(e.target.value)} placeholder="gmail, pokeapi, site-login" style={{ width: "100%", marginBottom: 12 }} />
+          <input className="input" required value={name} onChange={(e) => setName(e.target.value)} placeholder="bharatenglish, github, smtp" style={{ width: "100%", marginBottom: 12 }} />
           <label style={{ display: "block", fontSize: 13, marginBottom: 6, color: "var(--text-secondary)" }}>Username / email</label>
           <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" style={{ width: "100%", marginBottom: 12 }} />
           <label style={{ display: "block", fontSize: 13, marginBottom: 6, color: "var(--text-secondary)" }}>Password</label>

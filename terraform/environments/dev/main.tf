@@ -59,7 +59,7 @@ module "cloud_run_worker" {
   service_name        = "agenticos-worker"
   image               = var.worker_image
   service_account     = module.iam.worker_sa_email
-  min_instances       = 1
+  min_instances       = 0
   max_instances       = 10
   timeout_seconds     = 3600 # 1 hour for long running tasks
   concurrency         = 10

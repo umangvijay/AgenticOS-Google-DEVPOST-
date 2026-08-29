@@ -8,4 +8,6 @@ __pycache__
 node_modules
 frontend/.next
 frontend/node_modules
+data
+backend/security/keys
 sandbox_security_audit.log

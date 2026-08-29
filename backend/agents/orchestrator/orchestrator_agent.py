@@ -53,7 +53,15 @@ def get_orchestrator_agent(tool_router=None, catalog_json: str = "[]", memory_re
                 secrets_repo=getattr(tool_router, "secrets_repo", None),
             )
             source = api_docs_url_or_description.strip()
-            method = "url" if source.startswith(("http://", "https://")) else "prompt"
+            from backend.mcp.website_mcp import looks_like_website_without_api
+            if looks_like_website_without_api(
+                source, url=source if source.startswith(("http://", "https://")) else None
+            ):
+                method = "website"
+            elif source.startswith(("http://", "https://")):
+                method = "url"
+            else:
+                method = "prompt"
             result = await factory_agent.run_build(
                 user_id=user_id, method=method, source=source, name=name,
             )

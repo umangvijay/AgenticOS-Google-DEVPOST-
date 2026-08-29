@@ -2,8 +2,10 @@
 # This can be used directly by the Cloud Run module
 output "secret_env_mappings" {
   value = {
-    "GEMINI_API_KEY"       = google_secret_manager_secret.app_secrets["gemini_api_key"].id
-    "JWT_SECRET"           = google_secret_manager_secret.app_secrets["jwt_secret"].id
-    "CORS_ALLOWED_ORIGINS" = google_secret_manager_secret.app_secrets["cors_allowed_origins"].id
+    "GEMINI_API_KEY"           = google_secret_manager_secret.app_secrets["gemini_api_key"].id
+    "JWT_SECRET"               = google_secret_manager_secret.app_secrets["jwt_secret"].id
+    "CORS_ALLOWED_ORIGINS"     = google_secret_manager_secret.app_secrets["cors_allowed_origins"].id
+    "CONTACT_SMTP_PASSWORD"    = google_secret_manager_secret.app_secrets["contact_smtp_password"].id
+    "SECRETS_MASTER_KEY"       = google_secret_manager_secret.app_secrets["secrets_master_key"].id
   }
 }

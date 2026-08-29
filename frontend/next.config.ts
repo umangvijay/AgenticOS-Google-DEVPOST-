@@ -25,6 +25,7 @@ function loadRootEnv() {
 loadRootEnv();
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   compress: true,
   devIndicators: false,
   experimental: {

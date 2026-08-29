@@ -5,4 +5,4 @@
 3. The value is encrypted (AES-256-GCM) and never returned by the API.
 4. Workflows, MCP builds, debug, and generate load `cred:gemini` for that user and pass it to the Gemini client.
 
-If no user key is stored, AgentOS uses the server `GEMINI_API_KEY` from `.env`.
+If no user key is stored, AgentOS uses the server `GEMINI_API_KEY` from `.env` (local) or Secret Manager (Cloud Run). Never commit the key.

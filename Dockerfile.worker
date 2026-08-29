@@ -1,0 +1,26 @@
+# Same image as the API: the workflow engine runs in-process in FastAPI.
+# Cloud Build still tags a worker image for the optional Pub/Sub service.
+FROM python:3.11-slim as builder
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY --from=builder /app/wheels /wheels
+COPY --from=builder /app/requirements.txt .
+RUN pip install --no-cache /wheels/* \
+    && python -m playwright install --with-deps chromium
+
+COPY . .
+
+ENV PYTHONPATH=/app
+ENV PORT=8080
+ENV APP_ENV=production
+
+EXPOSE 8080
+
+CMD ["uvicorn", "backend.api.main:app", "--host", "0.0.0.0", "--port", "8080"]

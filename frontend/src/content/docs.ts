@@ -28,10 +28,11 @@ export const DOC_PAGES: {
       },
       {
         h: "Chat workspace",
-        p: "Open New chat, type a goal, press Enter. You stay on a conversation thread: your message, live agent events, and task output. Show graph reveals the DAG. Stop cancels an in-flight run. Failed runs can be retried.",
+        p: "Open New chat, type a goal, press Enter. You stay on a conversation thread: your message, live agent events, and task output. Show graph reveals the DAG. Show timeline lists autonomous actions. Stop cancels an in-flight run. Failed runs can be retried.",
         bullets: [
-          "Suggested chips are starting points, not limits.",
-          "Recent runs appear under the composer so you can reopen a thread.",
+          "OpenAPI chip / paste a spec URL to build HTTP tools, then ask to list or get.",
+          "HTTP API without a spec: Build MCP tools for GitHub / Open-Meteo / PokeAPI so I can list …",
+          "Website without an API: save a vault login, create MCP tools for the URL, then log in with that credential and use runOnSite.",
           "The context meter in the top bar is computed from your catalog, last run, and memory — not a fake percentage.",
         ],
       },
@@ -63,12 +64,11 @@ export const DOC_PAGES: {
       },
       {
         h: "Three ways to build",
-        p: "Use Integrations → Create MCP, or ask in chat.",
+        p: "Use Integrations → Create MCP, or ask in workspace chat. The automation agent builds the tools, then the next task in the same run (or the next message) can call them.",
         bullets: [
-          "From URL: paste OpenAPI/Swagger or public API docs. The builder fetches, normalizes, and probes.",
-          "From description: explain the app and endpoints in plain language.",
-          "From raw spec: paste JSON/YAML on Integrations → Create, or POST /api/v1/integrations/build.",
-          "From website: a site with no API gets Playwright tools locked to that origin. That is UI automation, not a hidden API.",
+          "OpenAPI URL: “Create MCP tools from https://…/openapi.json then list …”. Factory fetches, normalizes, probes, registers HTTP tools.",
+          "Any HTTP API (no OpenAPI): “Build MCP tools for [app] so I can [list / get / create …]”. The factory sketches a small OpenAPI from your words (or uses Gemini) against the public HTTPS host.",
+          "Website (no API): Vault → save e.g. bharatenglish (username/email + password). Chat: “Create MCP tools for https://…”. Then: “Log in with vault credential bharatenglish and open home / use runOnSite …”. That is Playwright on a locked origin, not a hidden REST API.",
         ],
       },
       {
@@ -216,7 +216,7 @@ export const DOC_PAGES: {
       },
       {
         h: "Where do I get help?",
-        p: "Use the FAQ page, these docs, or Contact. Messages are emailed via SMTP to the founding team when CONTACT_SMTP_PASSWORD is set.",
+        p: "Use the FAQ page, these docs, or Contact. Messages are emailed via SMTP to the founding team when CONTACT_SMTP_PASSWORD is a Gmail App Password (not your mailbox password).",
       },
     ],
   },
@@ -242,6 +242,31 @@ export const DOC_PAGES: {
       {
         h: "CAPTCHA, OTP, MFA",
         p: "These are human-only. The workflow pauses (WAITING_APPROVAL). Complete the check in the open browser, then Resume. AgentOS will not fill those fields.",
+      },
+      {
+        h: "Gmail and .env",
+        p: "Contact SMTP needs a Gmail App Password in CONTACT_SMTP_PASSWORD — never your Google login password. .env is gitignored. On Cloud Run, mount the App Password from Secret Manager.",
+      },
+    ],
+  },
+  {
+    slug: "deploy-gcp",
+    title: "Google Cloud",
+    blurb: "Optional Cloud Run hosting with $150 credits: scale to zero, Secret Manager, no .env in the image.",
+    diagram: ["gcloud", "Secret Manager", "Cloud Run", "Firestore optional"],
+    image: "/docs/api.svg",
+    sections: [
+      {
+        h: "Credits",
+        p: "Deploy the API with min instances 0 so idle time does not drain a new-account credit grant. An always-on worker will.",
+      },
+      {
+        h: "Secrets",
+        p: "GEMINI_API_KEY, CONTACT_SMTP_PASSWORD (App Password only), and SECRETS_MASTER_KEY go in Secret Manager. Docker never copies .env.",
+      },
+      {
+        h: "Data",
+        p: "SQLite on Cloud Run disappears when the instance scales to zero. Set STORAGE_BACKEND=firestore for durable users and runs. Commands: docs/deploy-gcp.md in the repo.",
       },
     ],
   },

@@ -3,7 +3,9 @@ locals {
   app_secrets = [
     "gemini_api_key",
     "jwt_secret",
-    "cors_allowed_origins"
+    "cors_allowed_origins",
+    "contact_smtp_password",
+    "secrets_master_key",
   ]
 }
 

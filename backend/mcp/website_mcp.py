@@ -40,7 +40,36 @@ def default_start_url(source: str, origin: str) -> str:
     return origin.rstrip("/") + "/"
 
 
+_WEBSITE_PHRASES = (
+    "this website", "this site", "web app", "login page", "learner portal",
+    "no openapi", "no open api", "no public api", "without an api", "without api",
+    "browser tools", "browser mcp", "website mcp", "playwright",
+)
+_API_HOST_FRAGMENTS = (
+    "pokeapi.", "open-meteo.", "openmeteo.", "httpbin.", "jsonplaceholder.",
+    "googleapis.com", "api.github.com", "api.gitlab.com", "api.stripe.com",
+)
+_API_PATH_FRAGMENTS = ("/api/", "/v1/", "/v2/", "/v3/", "/rest/", "/graphql")
+
+
+def looks_like_http_api_url(url: str) -> bool:
+    """True when the URL is a REST/OpenAPI host, not a human website."""
+    parsed = urlparse(url if "://" in (url or "") else f"https://{url}")
+    host = (parsed.hostname or "").lower()
+    path = (parsed.path or "").lower()
+    if not host:
+        return False
+    if host.startswith("api.") or host.startswith("openapi."):
+        return True
+    if any(frag in host for frag in _API_HOST_FRAGMENTS):
+        return True
+    if any(frag in path for frag in _API_PATH_FRAGMENTS):
+        return True
+    return False
+
+
 def looks_like_website_without_api(source: str, url: Optional[str] = None) -> bool:
+    """True when the user wants origin-locked browser tools, not HTTP MCP tools."""
     text = source or ""
     lowered = text.lower()
     if "openapi" in lowered or "swagger" in lowered:
@@ -51,14 +80,26 @@ def looks_like_website_without_api(source: str, url: Optional[str] = None) -> bo
         target = found.group(0) if found else ""
     if target:
         u = target.lower()
-        if u.endswith((".json", ".yaml", ".yml")) or "/openapi" in u or "/swagger" in u:
+        if u.endswith((".json", ".yaml", ".yml")) or "/openapi" in u or "/swagger" in u or "/api-docs" in u:
+            return False
+        if looks_like_http_api_url(target):
             return False
         fragment = target.split("#", 1)[1] if "#" in target else ""
         if fragment.strip("/"):
             return True
         if any(p in u for p in ("/login", "/signin", "/sign-in", "/auth/")):
             return True
-    return any(w in lowered for w in ("this website", "this site", "web app", "login page", "learner portal"))
+    if any(w in lowered for w in _WEBSITE_PHRASES):
+        return True
+    if re.search(r"\b(rest|http api|endpoints?)\b", lowered) and "website" not in lowered:
+        return False
+    if target and not looks_like_http_api_url(target):
+        if any(w in lowered for w in ("create tools", "build tools", "make tools", "mcp", "integration", "connector")):
+            return True
+        stripped = lowered.strip()
+        if stripped.startswith("http"):
+            return True
+    return False
 
 
 def _tool_name(raw: str, fallback: str) -> str:

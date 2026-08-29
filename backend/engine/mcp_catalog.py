@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 JSONPLACEHOLDER_SPEC = {
@@ -307,6 +307,9 @@ _PATH_ALIASES = {
         "user": "/user",
         "gist": "/gists",
         "gists": "/gists",
+        "event": "/events",
+        "events": "/events",
+        "zen": "/zen",
     },
     "https://pokeapi.co/api/v2": {
         "pokemon": "/pokemon",
@@ -390,17 +393,28 @@ def _wants_write(text: str) -> bool:
     return bool(re.search(r"\b(?:create|post|send|update|delete|write)\s+(?!mcp\b|tool\b)", cleaned))
 
 
-def _operation(method: str, op_id: str, summary: str, path_params: Optional[List[str]] = None) -> dict:
+def _operation(
+    method: str,
+    op_id: str,
+    summary: str,
+    path_params: Optional[List[str]] = None,
+    query_params: Optional[List[dict]] = None,
+) -> dict:
     op: Dict[str, object] = {
         "operationId": op_id,
         "summary": summary,
         "responses": {"200": {"description": "ok"}},
     }
+    params: List[dict] = []
     if path_params:
-        op["parameters"] = [
+        params.extend(
             {"name": name, "in": "path", "required": True, "schema": {"type": "string"}}
             for name in path_params
-        ]
+        )
+    if query_params:
+        params.extend(query_params)
+    if params:
+        op["parameters"] = params
     if method == "post":
         op["requestBody"] = {
             "content": {
@@ -426,19 +440,35 @@ def sketch_openapi_from_prompt(source: str) -> Optional[str]:
     wants_write = _wants_write(text)
     paths: Dict[str, dict] = {}
 
+    query_for = {
+        "https://api.open-meteo.com/v1": {
+            "/forecast": [
+                {"name": "latitude", "in": "query", "required": True, "schema": {"type": "number"}},
+                {"name": "longitude", "in": "query", "required": True, "schema": {"type": "number"}},
+                {"name": "current_weather", "in": "query", "schema": {"type": "boolean"}},
+            ]
+        }
+    }
+
     def add_path(path: str, method: str, op_id: str, summary: str) -> None:
         params = re.findall(r"\{([^}]+)\}", path)
-        paths.setdefault(path, {})[method] = _operation(method, op_id, summary, params or None)
+        qparams = (query_for.get(server.rstrip("/")) or {}).get(path)
+        paths.setdefault(path, {})[method] = _operation(
+            method, op_id, summary, params or None, qparams
+        )
 
     if server.rstrip("/") == "https://api.github.com" and not resources:
-        resources = ["repos", "issues"]
+        resources = ["events"] if "event" in text.lower() else ["repos", "issues"]
     if server.rstrip("/") == "https://pokeapi.co/api/v2" and not resources:
         resources = ["pokemon"]
+    if server.rstrip("/") == "https://api.open-meteo.com/v1" and not resources:
+        resources = ["forecast"]
 
     for noun in resources:
         path = aliases.get(noun) or aliases.get(noun.rstrip("s")) or f"/{noun}"
         add_path(path, "get", f"list_{noun}", f"List {noun}")
-        if "{" not in path:
+        skip_item = "{" in path or path.rstrip("/") in ("/events", "/zen", "/forecast")
+        if not skip_item:
             item = f"{path.rstrip('/')}/{{id}}"
             add_path(item, "get", f"get_{noun}", f"Get {noun} by id")
             if wants_write:
@@ -460,3 +490,87 @@ def sketch_openapi_from_prompt(source: str) -> Optional[str]:
         "paths": paths,
     }
     return json.dumps(spec)
+
+
+_STOP_SCORE = frozenset({
+    "the", "and", "for", "with", "that", "this", "from", "your", "please",
+    "then", "also", "mcp", "tool", "tools", "create", "build", "make", "can",
+    "list", "get", "fetch", "http", "https", "open", "home", "site",
+})
+
+
+def pick_catalog_tool(goal: str, catalog: Sequence[Any]) -> Optional[Dict[str, Any]]:
+    """Choose the catalog tool that best matches a follow-up chat goal."""
+    if not catalog:
+        return None
+    lowered = (goal or "").lower()
+    words = [w for w in re.findall(r"[a-z][a-z0-9_-]{2,}", lowered) if w not in _STOP_SCORE]
+    best: Optional[Dict[str, Any]] = None
+    best_score = -1
+    for raw in catalog:
+        tool = raw if isinstance(raw, dict) else {}
+        name = str(tool.get("name") or "")
+        mcp = str(tool.get("mcp_name") or "")
+        desc = str(tool.get("description") or "")
+        hay = f"{name} {mcp} {desc}".lower()
+        score = 0
+        for word in words:
+            if word in hay:
+                score += 2
+        nl = name.lower()
+        if "login" in lowered and "login" in nl:
+            score += 8
+        if "runonsite" in nl and any(w in lowered for w in ("browse", "on the site", "runonsite", "use run")):
+            score += 6
+        if "openhome" in nl and "home" in lowered:
+            score += 6
+        if any(w in lowered for w in ("pokemon", "pokeapi")) and "poke" in hay:
+            score += 8
+        if "github" in lowered and "github" in hay:
+            score += 8
+        if "event" in lowered and "event" in nl:
+            score += 6
+        if "weather" in lowered or "forecast" in lowered:
+            if "forecast" in hay or "meteo" in hay:
+                score += 8
+        if score > best_score:
+            best_score = score
+            best = tool
+    if best_score <= 0:
+        return catalog[0] if isinstance(catalog[0], dict) else None
+    return best
+
+
+def arguments_for_catalog_tool(tool: Dict[str, Any], goal: str) -> Dict[str, Any]:
+    """Fill safe arguments for a catalog tool from the user's follow-up text."""
+    schema = tool.get("input_schema") or {}
+    props = schema.get("properties") or {}
+    required = list(schema.get("required") or [])
+    args: Dict[str, Any] = {}
+    lowered = (goal or "").lower()
+    cred = None
+    m = re.search(
+        r"(?:vault\s+credential|credential(?:_name)?|named)\s+[\"']?([a-zA-Z0-9._-]{1,64})",
+        goal or "",
+        re.I,
+    )
+    if m:
+        cred = m.group(1)
+    if cred and ("credential_name" in props or "credential_name" in required):
+        args["credential_name"] = cred
+    name = str(tool.get("name") or "").lower()
+    if "goal" in props and name in ("runonsite", "run_on_site"):
+        args["goal"] = goal
+    if "latitude" in props and "longitude" in props:
+        if "london" in lowered:
+            args.setdefault("latitude", 51.51)
+            args.setdefault("longitude", -0.13)
+        elif "new york" in lowered or "nyc" in lowered:
+            args.setdefault("latitude", 40.71)
+            args.setdefault("longitude", -74.01)
+        else:
+            args.setdefault("latitude", 52.52)
+            args.setdefault("longitude", 13.41)
+        if "current_weather" in props:
+            args.setdefault("current_weather", True)
+    return args

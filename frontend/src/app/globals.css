@@ -751,7 +751,7 @@ body {
 .workspace-home {
   flex: 1;
   width: 100%;
-  max-width: 768px;
+  max-width: 840px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -770,6 +770,43 @@ body {
 }
 .workspace-sub { color: var(--text-secondary); margin: 0 auto; max-width: 520px; }
 .workspace-composer-wrap { width: 100%; }
+.mcp-howto {
+  width: 100%;
+  margin-top: 28px;
+  padding: 18px 20px;
+  text-align: left;
+}
+.mcp-howto h2 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 0 0 12px;
+}
+.mcp-howto ol {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.mcp-howto li strong { color: var(--text-primary); }
+.mcp-howto code {
+  font-size: 12.5px;
+  background: var(--bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+.mcp-howto p {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
 .recent-chats { width: 100%; margin-top: 36px; }
 .recent-chat-list { display: flex; flex-direction: column; gap: 8px; }
 .recent-chat-item {

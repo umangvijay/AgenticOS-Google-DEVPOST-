@@ -33,6 +33,23 @@ class WorkflowEngine:
         self.agent_factory = agent_factory
         self.memory_repo = memory_repo
         self.settings_repo = settings_repo
+
+    async def _call_matching_catalog_tool(self, run, catalog, tool_router, context) -> Optional[Dict[str, Any]]:
+        """When the model cannot pick a tool, call the catalog tool that matches the goal."""
+        if not tool_router or not catalog:
+            return None
+        from backend.engine.mcp_catalog import arguments_for_catalog_tool, pick_catalog_tool
+        tool = pick_catalog_tool(str(run.goal or ""), catalog)
+        if not tool:
+            return None
+        tool_name = tool.get("agent_tool_name") or tool.get("name")
+        if not tool_name:
+            return None
+        args = arguments_for_catalog_tool(tool, str(run.goal or ""))
+        try:
+            return await tool_router.execute_tool_safe(tool_name, args, context=context)
+        except Exception as te:
+            return {"tool": tool_name, "error": str(te)}
         
     def _emit_event(self, event_type: str, run_id: str, workflow_id: str, task_id: Optional[str] = None, status: Optional[str] = None, summary: str = "", metadata: dict = None):
         if metadata is None:
@@ -556,13 +573,7 @@ class WorkflowEngine:
             tool_result = None
             browse_out = None
             if tool_router and catalog:
-                first = catalog[0] if catalog else {}
-                tool_name = first.get("agent_tool_name") or first.get("name")
-                if tool_name:
-                    try:
-                        tool_result = await tool_router.execute_tool_safe(tool_name, {}, context=context)
-                    except Exception as te:
-                        tool_result = {"tool": tool_name, "error": str(te)}
+                tool_result = await self._call_matching_catalog_tool(run, catalog, tool_router, context)
             try:
                 from backend.engine.direct_plan import _url, _wants_browse
                 goal_text = str(run.goal or "")
@@ -619,15 +630,10 @@ class WorkflowEngine:
         if text:
             return {"reply": text, "message": text}
         if tool_router and catalog:
-            first = catalog[0] if catalog else {}
-            tool_name = first.get("agent_tool_name") or first.get("name")
-            if tool_name:
-                try:
-                    tool_result = await tool_router.execute_tool_safe(tool_name, {}, context=context)
-                    blob = json.dumps(tool_result, default=str)[:8000]
-                    return {"reply": blob, "message": blob, "tool_result": tool_result, "fallback": "catalog_tool"}
-                except Exception:
-                    pass
+            tool_result = await self._call_matching_catalog_tool(run, catalog, tool_router, context)
+            if tool_result is not None:
+                blob = json.dumps(tool_result, default=str)[:8000]
+                return {"reply": blob, "message": blob, "tool_result": tool_result, "fallback": "catalog_tool"}
         return {"reply": text, "message": text}
 
     # ══════════════════════════════════════════════════════════════════
