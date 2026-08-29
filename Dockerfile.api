@@ -31,4 +31,4 @@ ENV PYTHONPATH=/app \
 EXPOSE 8080
 
 # Cloud Run sets PORT. Do not bake .env into this image.
-CMD ["sh", "-c", "exec uvicorn backend.api.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "uvicorn backend.api.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
