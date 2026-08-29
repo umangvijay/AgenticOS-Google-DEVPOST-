@@ -12,8 +12,8 @@ export default function IntegrationsPage() {
   useEffect(() => {
     async function load() {
       try {
-        const { integrations } = await listIntegrations();
-        setIntegrations(integrations);
+        const data = await listIntegrations();
+        setIntegrations(Array.isArray(data.integrations) ? data.integrations : []);
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Failed to load integrations");
       } finally {
@@ -62,8 +62,14 @@ export default function IntegrationsPage() {
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <h3 style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)", margin: 0 }}>
-                  {mcp.name}
+                  {mcp.name || mcp.mcp_id}
                 </h3>
+                <span className={`badge ${
+                  mcp.circuit_breaker?.state === "OPEN" ? "badge-error" : 
+                  !mcp.is_enabled ? "badge-neutral" : "badge-success"
+                }`}>
+                  {mcp.circuit_breaker?.state === "OPEN" ? "Outage" : mcp.is_enabled ? "Active" : "Disabled"}
+                </span>
                 <span className={`badge ${
                   mcp.circuit_breaker?.state === "OPEN" ? "badge-error" : 
                   !mcp.is_enabled ? "badge-neutral" : "badge-success"
@@ -78,7 +84,7 @@ export default function IntegrationsPage() {
               
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border-primary)", paddingTop: 16 }}>
                 <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
-                  {mcp.tool_count} tools available
+                  {mcp.tool_count ?? 0} tools available
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: mcp.trust_tier === 'verified' ? "var(--success)" : "var(--warning)" }}>
                   Tier: {mcp.trust_tier}

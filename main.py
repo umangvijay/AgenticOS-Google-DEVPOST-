@@ -80,12 +80,12 @@ def validate_environment(logger) -> bool:
     """Validate required environment variables and dependencies."""
     errors = []
 
-    # Check GEMINI_API_KEY
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not api_key or len(api_key) < 10:
+    gemini = os.environ.get("GEMINI_API_KEY", "")
+    grok = os.environ.get("XAI_API_KEY", "")
+    if (not gemini or len(gemini) < 10) and (not grok or len(grok) < 8):
         errors.append(
-            "GEMINI_API_KEY is missing or invalid.\n"
-            "   Get one free at: https://aistudio.google.com/apikey\n"
+            "GEMINI_API_KEY is missing or invalid (and no XAI_API_KEY fallback).\n"
+            "   Get a Gemini key at: https://aistudio.google.com/apikey\n"
             "   Then add to .env: GEMINI_API_KEY=your_key_here"
         )
 
@@ -189,6 +189,26 @@ def ensure_frontend_deps(logger) -> bool:
     return True
 
 
+def ensure_playwright(logger) -> None:
+    """Install Chromium for the browser agent if it is missing."""
+    python_path = find_python()
+    logger.info("Ensuring Playwright Chromium is installed...")
+    try:
+        result = subprocess.run(
+            [python_path, "-m", "playwright", "install", "chromium"],
+            capture_output=True, text=True, timeout=180,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "Playwright Chromium is not ready. Browser automation needs: "
+                "playwright install chromium"
+            )
+        else:
+            logger.info("Playwright Chromium: ready")
+    except Exception as exc:
+        logger.warning("Could not install Playwright Chromium (%s)", exc)
+
+
 # ── Process Management ────────────────────────────────────────────
 
 def find_python() -> str:
@@ -241,7 +261,7 @@ def start_frontend(npm_path: str) -> subprocess.Popen:
     env["PORT"] = FRONTEND_PORT
 
     proc = subprocess.Popen(
-        [npm_path, "run", "dev"],
+        [npm_path, "run", "dev:fast", "--", "--webpack"],
         cwd=str(FRONTEND_DIR),
         env=env,
         stdout=subprocess.PIPE,
@@ -312,6 +332,9 @@ def main():
 
     # 3. Generate RSA keys if needed
     ensure_rsa_keys(logger)
+
+    # 3b. Browser agent Chromium
+    ensure_playwright(logger)
 
     # 4. Check frontend deps
     npm_path = find_npm()

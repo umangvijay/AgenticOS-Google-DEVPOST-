@@ -19,6 +19,7 @@ class UserRole(str, Enum):
     ADMIN = "admin"
     USER = "user"
     VIEWER = "viewer"
+    GUEST = "guest"
 
 
 class User(BaseModel):

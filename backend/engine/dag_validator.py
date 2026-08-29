@@ -1,7 +1,119 @@
-from backend.models.schemas import WorkflowDefinition
 import logging
+import re
+
+from backend.models.schemas import WorkflowDefinition
 
 logger = logging.getLogger(__name__)
+
+_HTTP_METHOD_BY_ACTION = {
+    "fetch": "GET",
+    "get": "GET",
+    "read": "GET",
+    "post": "POST",
+    "create": "POST",
+    "put": "PUT",
+    "update": "PUT",
+    "patch": "PATCH",
+    "delete": "DELETE",
+}
+
+
+def _extract_url_from_intent(intent: dict, extra_text: str = "") -> str | None:
+    """Best-effort URL extraction when the planner omits or truncates URL fields."""
+    blobs = [extra_text]
+    for field in ("target", "url", "context", "goal"):
+        val = intent.get(field, "")
+        if isinstance(val, str):
+            blobs.append(val)
+    text = " ".join(b for b in blobs if b)
+
+    match = re.search(r"https?://[^\s\"'<>]+", text)
+    if match:
+        url = match.group(0).rstrip(").,;]")
+        if _hostname_present(url):
+            return url
+
+    match = re.search(r"\b((?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s\"'<>]*)?)", text, re.I)
+    if match:
+        host_path = match.group(1).rstrip(").,;]")
+        if "@" not in host_path:
+            return "https://" + host_path
+    return None
+
+
+def _hostname_present(url: str) -> bool:
+    from urllib.parse import urlparse
+    try:
+        return bool(urlparse(url).hostname)
+    except Exception:
+        return False
+
+
+def _find_catalog_tool(intent: dict, catalog: list) -> dict | None:
+    """Match intent action/target to a registered integration tool."""
+    if not catalog:
+        return None
+    action = str(intent.get("action", "")).strip()
+    target = str(intent.get("target", "")).lower()
+    context = str(intent.get("context", "")).lower()
+    search = f"{action} {target} {context}".lower()
+
+    # Exact tool name match (e.g. action=getInventory)
+    if action:
+        for tool in catalog:
+            if tool.get("name", "").lower() == action.lower():
+                return tool
+
+    # Tool name appears in intent text
+    for tool in catalog:
+        name = tool.get("name", "").lower()
+        if name and name in search:
+            return tool
+
+    # Integration name match (e.g. "Petstore" in target) — pick first tool from that MCP
+    for tool in catalog:
+        mcp_name = tool.get("mcp_name", "").lower()
+        if mcp_name and mcp_name in search:
+            return tool
+
+    return None
+
+
+def enrich_plan_from_intent(
+    definition: WorkflowDefinition,
+    intent: dict,
+    catalog: list | None = None,
+    goal: str = "",
+) -> WorkflowDefinition:
+    """Fill missing HTTP/health URLs or reroute to OrchestratorAgent when a catalog tool matches."""
+    url = _extract_url_from_intent(intent, extra_text=goal)
+    action = str(intent.get("action", "fetch")).lower()
+    default_method = _HTTP_METHOD_BY_ACTION.get(action, "GET")
+    matched_tool = _find_catalog_tool(intent, catalog or [])
+
+    for task in definition.tasks:
+        if task.agent == "core.http" and not _hostname_present(str(task.input_data.get("url") or "")):
+            if matched_tool:
+                task.agent = "OrchestratorAgent"
+                task.tool = matched_tool.get("agent_tool_name")
+                task.input_data = {
+                    "goal": intent.get("context") or intent.get("target") or action,
+                    "tool": matched_tool.get("agent_tool_name"),
+                }
+                logger.info(
+                    "Rerouted core.http task %s to OrchestratorAgent tool %s",
+                    task.task_id,
+                    task.tool,
+                )
+                continue
+            if url:
+                task.input_data["url"] = url
+        if task.agent == "core.http" and not task.input_data.get("method"):
+            task.input_data["method"] = default_method
+        if task.agent == "core.health" and url and not _hostname_present(str(task.input_data.get("url") or "")):
+            task.input_data["url"] = url
+
+    return definition
 
 class DAGValidationError(Exception):
     pass

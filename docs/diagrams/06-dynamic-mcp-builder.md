@@ -1,10 +1,18 @@
-# Dynamic MCP Builder Flow
+# Dynamic MCP builder
 
 ```mermaid
-graph TD
-    User[User/System] -->|Provide OpenAPI Spec| Parser[OpenAPI Parser]
-    Parser -->|Parse & Normalize| Model[Normalized API Model]
-    Model -->|Generate Code| SchemaGen[Schema Generator]
-    SchemaGen -->|Dynamic Loading| Proxy[OpenAPI MCP Proxy]
-    Proxy -->|Expose Tools| MCPServer[Dynamically Built Server]
+flowchart TD
+  goal[GoalOrCreateUI] --> exists{ToolExists}
+  exists -->|yes| use[UseRegisteredMCP]
+  exists -->|no| kind{HasOpenAPI}
+  kind -->|yes| ingest[FetchOrPasteSpec]
+  ingest --> schema[GenerateToolSchema]
+  schema --> probe[LiveHTTPProbe]
+  probe --> register[RegisterMCP]
+  kind -->|no website| plan[PlanBrowserTools]
+  plan --> origin[LockOrigin]
+  origin --> register
+  register --> catalog[AvailableToAllAgents]
 ```
+
+HTTP path: OpenAPI, docs URL, or a prompt that sketches a spec. Website path: Playwright tools on one origin. No hidden official API is invented.

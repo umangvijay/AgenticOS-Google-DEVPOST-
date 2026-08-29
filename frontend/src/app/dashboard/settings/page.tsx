@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getSettings, updateSettings, UserSettings } from "@/lib/api";
+import { getSettings, updateSettings, UserSettings, storeCredential, pingGemini } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
 export default function SettingsPage() {
@@ -12,6 +12,10 @@ export default function SettingsPage() {
   const [message, setMessage] = useState({ text: "", type: "" });
 
   const [name, setName] = useState(user?.name || "");
+  const [grokKey, setGrokKey] = useState("");
+  const [savingGrok, setSavingGrok] = useState(false);
+  const [testingKey, setTestingKey] = useState(false);
+  const [keyMessage, setKeyMessage] = useState({ text: "", type: "" });
 
   useEffect(() => {
     async function load() {
@@ -52,6 +56,57 @@ export default function SettingsPage() {
       setMessage({ text: err instanceof Error ? err.message : "Failed to save settings", type: "error" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveGeminiKey = async () => {
+    if (!geminiKey.trim()) return;
+    setSavingKey(true);
+    setKeyMessage({ text: "", type: "" });
+    try {
+      await storeCredential("gemini", { api_key: geminiKey.trim() });
+      setGeminiKey("");
+      setKeyMessage({ text: "Gemini key stored in the vault. New runs will use it.", type: "success" });
+    } catch (err: unknown) {
+      setKeyMessage({ text: err instanceof Error ? err.message : "Could not save key", type: "error" });
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const saveGrokKey = async () => {
+    if (!grokKey.trim()) return;
+    setSavingGrok(true);
+    setKeyMessage({ text: "", type: "" });
+    try {
+      await storeCredential("grok", { api_key: grokKey.trim() });
+      setGrokKey("");
+      setKeyMessage({ text: "Grok key stored. It is used when Gemini is unavailable.", type: "success" });
+    } catch (err: unknown) {
+      setKeyMessage({ text: err instanceof Error ? err.message : "Could not save Grok key", type: "error" });
+    } finally {
+      setSavingGrok(false);
+    }
+  };
+
+  const testGemini = async () => {
+    setTestingKey(true);
+    setKeyMessage({ text: "", type: "" });
+    try {
+      const res = await pingGemini();
+      setKeyMessage({
+        text: res.ok
+          ? `Gemini is working${res.using_user_key ? " with your vault key" : " with the server key"}.`
+          : `Gemini replied: ${res.reply || "unexpected response"}`,
+        type: res.ok ? "success" : "error",
+      });
+    } catch (err: unknown) {
+      setKeyMessage({
+        text: err instanceof Error ? err.message : "Gemini test failed. Save your key in Settings and try again.",
+        type: "error",
+      });
+    } finally {
+      setTestingKey(false);
     }
   };
 
@@ -141,6 +196,54 @@ export default function SettingsPage() {
               style={{ width: 16, height: 16, accentColor: "var(--accent)" }}
             />
             <label htmlFor="autoApprove" style={{ fontSize: 14, cursor: "pointer" }}>Auto-approve low risk actions</label>
+          </div>
+        </div>
+
+        <div className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20, borderBottom: "1px solid var(--border-primary)", paddingBottom: 12 }}>
+            Your Gemini API key
+          </h2>
+          <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 16 }}>
+            Bring your own key from Google AI Studio. It is stored encrypted in Vault as <code>gemini</code> and used for planning, MCP builds, and generation instead of the shared quota.
+          </p>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <input
+              type="password"
+              className="input"
+              placeholder="AIza… or AQ.…"
+              value={geminiKey}
+              onChange={(e) => setGeminiKey(e.target.value)}
+              style={{ flex: 1, minWidth: 240, fontSize: 16 }}
+            />
+            <button type="button" className="btn btn-secondary" disabled={savingKey || !geminiKey.trim()} onClick={saveGeminiKey}>
+              {savingKey ? "Saving…" : "Save key"}
+            </button>
+            <button type="button" className="btn btn-ghost" disabled={testingKey} onClick={testGemini}>
+              {testingKey ? "Testing…" : "Test Gemini"}
+            </button>
+          </div>
+          {keyMessage && <p style={{ marginTop: 12, fontSize: 13, color: keyMessage.type === "success" ? "var(--success)" : "var(--error)" }}>{keyMessage.text}</p>}
+        </div>
+
+        <div className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20, borderBottom: "1px solid var(--border-primary)", paddingBottom: 12 }}>
+            Grok fallback key (optional)
+          </h2>
+          <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 16 }}>
+            An xAI secret (usually starts with xai-). Used only when Gemini hits quota. Stored as vault name <code>grok</code>.
+          </p>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <input
+              type="password"
+              className="input"
+              placeholder="xai-…"
+              value={grokKey}
+              onChange={(e) => setGrokKey(e.target.value)}
+              style={{ flex: 1, minWidth: 240, fontSize: 16 }}
+            />
+            <button type="button" className="btn btn-secondary" disabled={savingGrok || !grokKey.trim()} onClick={saveGrokKey}>
+              {savingGrok ? "Saving…" : "Save Grok key"}
+            </button>
           </div>
         </div>
 

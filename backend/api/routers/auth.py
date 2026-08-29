@@ -16,8 +16,11 @@ Endpoints:
 """
 
 import uuid
+import os
 import logging
 from datetime import datetime, timezone, timedelta
+
+import bcrypt
 
 from fastapi import APIRouter, HTTPException, Depends, Request, status
 
@@ -495,15 +498,17 @@ async def create_guest_session(request: Request):
     guest_id = str(uuid.uuid4())
     guest_email = f"guest-{guest_id[:8]}@agentos.local"
     guest_name = "Guest User"
-    
-    # Create the user
+
+    # Guests authenticate only via the issued JWT. Low-cost hash keeps Get Started fast.
+    guest_hash = bcrypt.hashpw(os.urandom(16), bcrypt.gensalt(rounds=4)).decode("utf-8")
+
     await factory.user_repo.create_user({
         "id": guest_id,
         "email": guest_email,
         "name": guest_name,
-        "password_hash": hash_password(str(uuid.uuid4())), # random unused password
+        "password_hash": guest_hash,
         "auth_provider": "local",
-        "role": "guest", # specific role
+        "role": "guest",
     })
     
     # Generate tokens
@@ -527,6 +532,8 @@ async def create_guest_session(request: Request):
     })
     
     user_data = await factory.user_repo.get_by_id(guest_id)
+    if not user_data:
+        raise HTTPException(status_code=500, detail="Guest session could not be created")
     return AuthResponse(
         access_token=access_token,
         refresh_token=refresh_token,

@@ -5,8 +5,12 @@ Dual-mode: local (SQLite) and cloud (Firestore).
 Model selection is config, not a constant buried in code.
 """
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -40,15 +44,19 @@ class Settings(BaseSettings):
     # ── Gemini AI ────────────────────────────────────────────────
     # Per spec: gemini-3.5-flash as default everywhere.
     # gemini-3.1-pro only for tasks needing deeper reasoning.
-    GEMINI_MODEL: str = "gemini-3.5-flash"
+    GEMINI_MODEL: str = "gemini-3.6-flash"
     GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-2-preview"
     GEMINI_API_KEY: Optional[str] = None
+
+    # ── xAI Grok (fallback when Gemini quota/key fails) ──────────
+    XAI_API_KEY: Optional[str] = None
+    GROK_MODEL: str = "grok-4-fast"
 
     # ── Authentication — JWT (RS256) ─────────────────────────────
     # Auto-generated on first run if missing.
     JWT_PRIVATE_KEY_PATH: str = "backend/security/keys/private.pem"
     JWT_PUBLIC_KEY_PATH: str = "backend/security/keys/public.pem"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     JWT_ISSUER: str = "agentos"
     JWT_AUDIENCE: str = "agentos-api"
@@ -63,11 +71,24 @@ class Settings(BaseSettings):
     # Master key for AES-256-GCM encryption of stored credentials.
     # Auto-generated on first run if empty.
     SECRETS_MASTER_KEY: Optional[str] = None
+    # Optional HMAC pepper mixed into passwords before bcrypt. Leave empty
+    # to keep existing hashes working; set a long random value for new installs.
+    PASSWORD_PEPPER: Optional[str] = None
+
+    # ── Contact form (SMTP to the founding team) ─────────────────
+    CONTACT_TO_EMAIL: str = "godumang35@gmail.com"
+    CONTACT_FROM_EMAIL: Optional[str] = None
+    CONTACT_SMTP_HOST: Optional[str] = None
+    CONTACT_SMTP_PORT: int = 587
+    CONTACT_SMTP_USERNAME: Optional[str] = None
+    CONTACT_SMTP_PASSWORD: Optional[str] = None
+    CONTACT_WEBHOOK_URL: Optional[str] = None
+    RESEND_API_KEY: Optional[str] = None
 
     # ── Rate Limiting ────────────────────────────────────────────
-    RATE_LIMIT_AUTH: int = 5          # per minute on auth endpoints
-    RATE_LIMIT_WORKFLOW: int = 10     # per minute on workflow creation
-    RATE_LIMIT_MCP_BUILD: int = 3     # per minute on MCP builder
+    RATE_LIMIT_AUTH: int = 20         # per minute on auth endpoints
+    RATE_LIMIT_WORKFLOW: int = 30     # per minute on workflow creation
+    RATE_LIMIT_MCP_BUILD: int = 10    # per minute on MCP builder
     RATE_LIMIT_GENERAL: int = 60      # per minute general
 
     # ── Token Budgets ────────────────────────────────────────────
@@ -75,9 +96,9 @@ class Settings(BaseSettings):
     RESEARCH_MAX_HOPS: int = 10                 # max hops for research agent
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_PROJECT_ROOT / ".env"),
         env_file_encoding="utf-8",
-        extra="ignore"
+        extra="ignore",
     )
 
 

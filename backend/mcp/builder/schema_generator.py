@@ -66,6 +66,17 @@ class SchemaGenerator:
         # Long expiration for dynamically built connectors, cache invalidation handled separately
         expires_at = now + timedelta(days=365)
         
+        mutating = op.http_method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
+        from backend.models.security import RiskLevel
+        operation = {
+            "http_method": op.http_method.upper(),
+            "path": op.path,
+            "servers": [s.model_dump() for s in op.servers],
+            "parameters": [
+                p.model_dump(by_alias=True) for p in op.parameters
+            ],
+            "has_request_body": op.request_body is not None,
+        }
         return CachedToolDefinition(
             tool_name=tool_name,
             description=op.summary or op.description or f"Invoke {op.operation_id}",
@@ -74,11 +85,17 @@ class SchemaGenerator:
             mcp_version=mcp_version,
             discovered_at=now,
             expires_at=expires_at,
-            auth_requirements=auth_reqs
+            auth_requirements=auth_reqs,
+            risk_level=RiskLevel.HIGH if mutating else RiskLevel.LOW,
+            operation=operation,
         )
 
     def generate(self, model: NormalizedAPIModel, mcp_id: str, mcp_version: str) -> List[CachedToolDefinition]:
         tools = []
-        for op in model.operations:
-            tools.append(self.generate_tool_schema(op, mcp_id, mcp_version))
+        default_servers = [s.model_dump() for s in model.servers]
+        for op in model.operations[:80]:
+            tool = self.generate_tool_schema(op, mcp_id, mcp_version)
+            if tool.operation and not tool.operation.get("servers"):
+                tool.operation["servers"] = default_servers
+            tools.append(tool)
         return tools

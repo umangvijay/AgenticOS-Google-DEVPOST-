@@ -20,6 +20,9 @@ DEFAULT_SETTINGS = {
     "theme": "dark",
     "notifications_email": False,
     "notifications_approval": True,
+    "notifications_enabled": True,
+    "auto_approve_low_risk": False,
+    "default_model": "gemini-3.6-flash",
     "daily_token_limit": 1_000_000,
 }
 

@@ -80,6 +80,19 @@ class SQLiteScheduleRepository(BaseScheduleRepository):
         await conn.commit()
         return cursor.rowcount > 0
 
+    async def list_due_schedules(self, now_iso: str) -> List[Dict[str, Any]]:
+        """Schedules that are active and due to fire (next_run_at <= now)."""
+        rows = await self.db.fetch_all(
+            """
+            SELECT * FROM schedules
+            WHERE UPPER(status) = 'ACTIVE'
+              AND next_run_at IS NOT NULL
+              AND next_run_at <= ?
+            """,
+            (now_iso,),
+        )
+        return [dict(r) for r in rows]
+
     async def record_execution(self, schedule_id: str, run_id: str, status: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
         conn = await self.db.connection()

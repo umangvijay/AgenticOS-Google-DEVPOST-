@@ -68,13 +68,15 @@ async def add_memory(
     except Exception as e:
         logger.warning(f"Embedding generation failed: {e}")
 
-    memory_id = await factory.memory_repo.add_memory(
+    metadata = dict(body.metadata or {})
+    if body.tags:
+        metadata["tags"] = body.tags
+    memory_id = await factory.memory_repo.store_memory(
         user_id=user.user_id,
         content=content,
-        embedding=embedding,
         memory_type=body.memory_type,
-        tags=body.tags,
-        metadata=body.metadata,
+        metadata=metadata,
+        embedding=embedding or [],
     )
 
     return {"memory_id": memory_id, "embedded": embedding is not None}
@@ -128,9 +130,10 @@ async def search_memory(
         logger.warning(f"Query embedding failed: {e}")
         raise HTTPException(status_code=500, detail="Embedding service unavailable")
 
-    results = await factory.memory_repo.search_similar(
+    results = await factory.memory_repo.search_memory(
         user_id=user.user_id,
         query_embedding=query_embedding,
+        memory_type=body.memory_type,
         limit=body.limit,
     )
 
@@ -144,7 +147,7 @@ async def delete_memory(
 ):
     """Delete a memory entry."""
     factory = _get_factory(request)
-    deleted = await factory.memory_repo.delete_memory(memory_id, user.user_id)
+    deleted = await factory.memory_repo.delete_memory(user.user_id, memory_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Memory entry not found")
     return {"memory_id": memory_id, "deleted": True}

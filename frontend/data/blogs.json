@@ -1,0 +1,20 @@
+[
+  {
+    "title": "Introducing AgentOS 2.0: The Autonomous Era",
+    "date": "August 15, 2026",
+    "category": "Product Updates",
+    "excerpt": "Today we are thrilled to announce AgentOS 2.0, featuring dynamic MCP server generation and our brand new orchestration engine."
+  },
+  {
+    "title": "How to Build a Custom Workflow in 10 Minutes",
+    "date": "August 2, 2026",
+    "category": "Tutorials",
+    "excerpt": "A step-by-step guide to using our visual workflow editor to automate your customer support pipeline."
+  },
+  {
+    "title": "The Future of Human-in-the-Loop AI",
+    "date": "July 18, 2026",
+    "category": "Engineering",
+    "excerpt": "Why fully autonomous agents still need human oversight for critical decisions, and how AgentOS handles it natively."
+  }
+]

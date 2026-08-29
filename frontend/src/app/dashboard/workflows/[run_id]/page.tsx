@@ -2,13 +2,15 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getWorkflow, subscribeWorkflowEvents, cancelWorkflow, retryWorkflow, WorkflowRun, WorkflowEvent } from "@/lib/api";
+import { getWorkflow, subscribeWorkflowEvents, cancelWorkflow, retryWorkflow, listApprovals, resolveApproval, WorkflowRun, WorkflowEvent } from "@/lib/api";
 import WorkflowGraph from "@/components/WorkflowGraph";
 
 // Assuming we would have an API function like this in the real api.ts
-const respondToApproval = async (taskId: string, approved: boolean, modifiedArgs?: Record<string, any>) => {
-  // Mock API call since this is frontend-focused
-  console.log(`Responding to approval for task ${taskId}:`, { approved, modifiedArgs });
+const respondToApproval = async (taskId: string, approved: boolean) => {
+  const { approvals } = await listApprovals();
+  const match = approvals.find((a) => a.task_id === taskId);
+  if (!match) throw new Error("No pending approval for this task");
+  await resolveApproval(match.approval_id, approved ? "approve" : "reject");
 };
 
 export default function WorkflowExecutionPage() {
@@ -47,7 +49,10 @@ export default function WorkflowExecutionPage() {
     const unsubscribe = subscribeWorkflowEvents(
       runId,
       (event) => {
-        setEvents(prev => [...prev, event]);
+        setEvents(prev => {
+          if (event.event_id && prev.some((e) => e.event_id === event.event_id)) return prev;
+          return [...prev, event];
+        });
         // Update local workflow state based on event
         setWorkflow(prev => {
           if (!prev) return prev;
@@ -83,7 +88,7 @@ export default function WorkflowExecutionPage() {
     );
 
     return () => unsubscribe();
-  }, [runId, workflow?.status]);
+  }, [runId]);
 
   // Auto-scroll events
   useEffect(() => {
@@ -96,8 +101,11 @@ export default function WorkflowExecutionPage() {
       await cancelWorkflow(runId);
       const wf = await getWorkflow(runId);
       setWorkflow(wf);
-    } catch (err) {
-      alert("Failed to cancel: " + (err instanceof Error ? err.message : String(err)));
+    } catch {
+      try {
+        const wf = await getWorkflow(runId);
+        setWorkflow(wf);
+      } catch { /* ignore */ }
     }
   };
 
@@ -128,7 +136,7 @@ export default function WorkflowExecutionPage() {
   const isTerminal = ["COMPLETED", "FAILED", "CANCELLED"].includes(workflow.status);
 
   return (
-    <div className="animate-fade-in" style={{ display: "flex", gap: 24, height: "calc(100vh - 120px)" }}>
+    <div className="animate-fade-in workflow-detail" style={{ display: "flex", gap: 24, height: "calc(100dvh - 120px)", flexWrap: "wrap" }}>
       
       {/* Left Column: DAG & Details (2/3 width) */}
       <div style={{ flex: 2, display: "flex", flexDirection: "column", gap: 24, overflowY: "auto", paddingRight: 8 }}>
@@ -254,8 +262,8 @@ export default function WorkflowExecutionPage() {
                Waiting for events...
              </div>
           ) : (
-            events.map(ev => (
-              <div key={ev.event_id} style={{
+            events.map((ev, i) => (
+              <div key={`${ev.event_id || "evt"}-${i}`} style={{
                 padding: 12, borderRadius: "var(--radius-md)",
                 background: "var(--bg-input)", border: "1px solid var(--border-primary)",
                 fontSize: 13, fontFamily: "var(--font-mono)"

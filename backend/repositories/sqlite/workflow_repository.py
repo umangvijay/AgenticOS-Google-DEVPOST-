@@ -31,8 +31,8 @@ class SQLiteWorkflowRepository(BaseWorkflowRepository):
         # Upsert the run
         await conn.execute(
             """
-            INSERT INTO workflow_runs (run_id, workflow_id, user_id, goal, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO workflow_runs (run_id, workflow_id, user_id, goal, status, created_at, updated_at, parent_run_id, thread_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
                 status = excluded.status,
                 updated_at = excluded.updated_at
@@ -45,6 +45,8 @@ class SQLiteWorkflowRepository(BaseWorkflowRepository):
                 run_data.get("status", "PENDING"),
                 run_data.get("created_at", now),
                 now,
+                run_data.get("parent_run_id"),
+                run_data.get("thread_id") or run_data["run_id"],
             ),
         )
 
@@ -79,6 +81,26 @@ class SQLiteWorkflowRepository(BaseWorkflowRepository):
             LIMIT ? OFFSET ?
             """,
             (user_id, limit, offset),
+        )
+        runs = []
+        for row in rows:
+            run = dict(row)
+            task_rows = await self.db.fetch_all(
+                "SELECT * FROM tasks WHERE run_id = ? ORDER BY rowid",
+                (run["run_id"],),
+            )
+            run["tasks"] = [self._task_row_to_dict(t) for t in task_rows]
+            runs.append(run)
+        return runs
+
+    async def list_thread_runs(self, user_id: str, thread_id: str) -> List[Dict[str, Any]]:
+        rows = await self.db.fetch_all(
+            """
+            SELECT * FROM workflow_runs
+            WHERE user_id = ? AND (thread_id = ? OR run_id = ? OR parent_run_id = ?)
+            ORDER BY created_at ASC
+            """,
+            (user_id, thread_id, thread_id, thread_id),
         )
         runs = []
         for row in rows:

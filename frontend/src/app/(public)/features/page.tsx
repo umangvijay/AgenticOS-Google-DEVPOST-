@@ -1,57 +1,28 @@
 import Link from "next/link";
+import Image from "next/image";
+import PublicNavbar from "@/components/PublicNavbar";
 
 export default function FeaturesPage() {
   return (
     <div className="mesh-gradient" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       {/* Navbar */}
-      <header style={{
-        padding: "20px 40px", display: "flex", justifyContent: "space-between", alignItems: "center",
-        borderBottom: "1px solid var(--border-primary)", backdropFilter: "blur(12px)",
-        position: "sticky", top: 0, zIndex: 100
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Link href="/" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: "var(--radius-md)",
-              background: "linear-gradient(135deg, var(--accent), #8b5cf6)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 16, fontWeight: 800, color: "white",
-            }}>
-              A
-            </div>
-            <span style={{ fontSize: 20, fontWeight: 700 }} className="gradient-text">
-              AgentOS
-            </span>
-          </Link>
-        </div>
-        <div style={{ display: "flex", gap: 32, alignItems: "center" }}>
-          <nav style={{ display: "flex", gap: 24, fontSize: 14, fontWeight: 500, color: "var(--text-secondary)" }}>
-            <Link href="/about" className="hover:text-primary transition-colors">About Us</Link>
-            <Link href="/features" className="hover:text-primary transition-colors" style={{ color: "var(--text-primary)" }}>Features</Link>
-            <Link href="/contact" className="hover:text-primary transition-colors">Contact Us</Link>
-          </nav>
-          <div style={{ display: "flex", gap: 16 }}>
-            <Link href="/login" className="btn btn-ghost">Sign In</Link>
-            <Link href="/get-started" className="btn btn-primary">Get Started</Link>
-          </div>
-        </div>
-      </header>
+      <PublicNavbar />
 
       {/* Content */}
-      <main style={{ flex: 1, padding: "80px 20px", maxWidth: 1200, margin: "0 auto", textAlign: "center" }}>
-        <h1 style={{ fontSize: "clamp(40px, 6vw, 64px)", fontWeight: 800, marginBottom: 24 }} className="gradient-text">
+      <main className="px-4 py-12 md:py-20" style={{ flex: 1, maxWidth: 1200, margin: "0 auto", textAlign: "center" }}>
+        <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold mb-6 gradient-text">
           Features
         </h1>
-        <p style={{ fontSize: 20, color: "var(--text-secondary)", marginBottom: 80, lineHeight: 1.6, maxWidth: 800, margin: "0 auto 80px" }}>
+        <p className="text-lg md:text-xl text-[var(--text-secondary)] leading-relaxed max-w-3xl mx-auto mb-16 md:mb-20">
           AgentOS represents a paradigm shift from deterministic workflow engines to autonomous goal-oriented systems.
           Explore the architecture that makes it possible.
         </p>
 
         {/* Dynamic Builder */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 64, marginBottom: 100, textAlign: "left", alignItems: "center" }}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-16 mb-20 md:mb-24 text-left items-center">
           <div>
-            <h2 style={{ fontSize: 32, fontWeight: 800, marginBottom: 16 }}>The Dynamic Builder</h2>
-            <p style={{ fontSize: 18, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 24 }}>
+            <h2 className="text-3xl md:text-4xl font-extrabold mb-4">The Dynamic Builder</h2>
+            <p className="text-base md:text-lg text-[var(--text-secondary)] leading-relaxed mb-6">
               Say goodbye to missing integrations. When you ask AgentOS to interact with an API it doesn't recognize, 
               it dispatches a sub-agent to find the API documentation, understand the authentication requirements, 
               and write a Python Model Context Protocol (MCP) server from scratch.
@@ -62,25 +33,25 @@ export default function FeaturesPage() {
               <li style={{ display: "flex", gap: 12 }}><span style={{ color: "var(--success)" }}>✓</span> <span>Automated Docker containerization</span></li>
             </ul>
           </div>
-          <div className="glass-card" style={{ padding: 40, height: 400, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 64, marginBottom: 16 }}>🏭</div>
-              <div style={{ fontFamily: "var(--font-mono)", color: "var(--accent-pink)" }}>Building MCP Tool...</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, alignItems: "center" }}>
+            <div className="glass-card" style={{ padding: 12, width: "100%", height: "auto", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 12 }}>
+              <Image src="/images/workflow-sketch.png" alt="Workflow Sketch" width={600} height={400} style={{ width: "100%", height: "auto", objectFit: "contain", filter: "invert(1) opacity(0.8)", borderRadius: 6 }} />
             </div>
+            <div style={{ fontFamily: "var(--font-mono)", color: "var(--accent-pink)", textAlign: "center" }}>Building MCP Tool...</div>
           </div>
         </div>
 
         {/* Multi-Agent Orchestration */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 64, marginBottom: 100, textAlign: "left", alignItems: "center", flexDirection: "row-reverse" }}>
-          <div className="glass-card" style={{ padding: 40, height: 400, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 64, marginBottom: 16 }}>🤖</div>
-              <div style={{ fontFamily: "var(--font-mono)", color: "var(--accent-purple)" }}>Routing to Specialized Agents...</div>
+        <div className="flex flex-col-reverse md:flex-row gap-10 md:gap-16 mb-20 md:mb-24 text-left items-center">
+          <div className="flex flex-col gap-4 items-center w-full md:w-1/2">
+            <div className="glass-card p-3 w-full h-auto flex items-center justify-center rounded-xl">
+              <Image src="/images/network-sketch.png" alt="Network Sketch" width={600} height={400} className="w-full h-auto object-contain rounded-md" style={{ filter: "invert(1) opacity(0.8)" }} />
             </div>
+            <div className="font-mono text-[var(--accent-purple)] text-center text-sm md:text-base">Routing to Specialized Agents...</div>
           </div>
-          <div>
-            <h2 style={{ fontSize: 32, fontWeight: 800, marginBottom: 16 }}>Multi-Agent Orchestration</h2>
-            <p style={{ fontSize: 18, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 24 }}>
+          <div className="w-full md:w-1/2">
+            <h2 className="text-3xl md:text-4xl font-extrabold mb-4">Multi-Agent Orchestration</h2>
+            <p className="text-base md:text-lg text-[var(--text-secondary)] leading-relaxed mb-6">
               AgentOS doesn't rely on a single massive prompt. It utilizes a topology of specialized agents powered by Google's ADK.
               The Intent Agent plans, the Orchestrator executes, the Research Agent gathers context, and the Recovery Agent handles failures.
             </p>
@@ -94,8 +65,8 @@ export default function FeaturesPage() {
       </main>
 
       {/* Footer */}
-      <footer style={{ padding: "64px 40px", borderTop: "1px solid var(--border-primary)", background: "var(--bg-primary)" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", textAlign: "center", color: "var(--text-secondary)" }}>
+      <footer className="py-12 px-6 md:py-16 md:px-10 border-t border-[var(--border-primary)] bg-[var(--bg-primary)] mt-12 md:mt-20">
+        <div className="max-w-6xl mx-auto text-center text-[var(--text-secondary)]">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 24 }}>
             <div style={{
               width: 24, height: 24, borderRadius: "6px",

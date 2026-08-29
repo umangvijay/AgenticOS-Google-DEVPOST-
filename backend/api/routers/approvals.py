@@ -1,140 +1,154 @@
+"""
+AgentOS — Approvals Router
+
+GET  /api/v1/approvals                 — List pending approvals for the user
+POST /api/v1/approvals/{id}/approve    — Approve and resume the workflow task
+POST /api/v1/approvals/{id}/reject     — Reject and fail the workflow task
+"""
+
 import logging
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
-from backend.models.security import ApprovalRequest, ApprovalStatus
-from backend.repositories.workflow_repository import WorkflowRepository
-from backend.repositories.message_bus import MessageBus
+from fastapi import APIRouter, Depends, HTTPException, Request
+from backend.models.security import ApprovalStatus
 from backend.models.schemas import TaskTriggerEvent, TaskStatus
-from backend.api.dependencies.auth import get_current_user
+from backend.api.dependencies.auth import get_current_user, AuthenticatedUser
 from backend.repositories.audit_repository import audit_repo, AuditEvent
+from backend.engine.repo_adapter import maybe_await, load_run, persist_task
 
 logger = logging.getLogger(__name__)
 
-# Note: In a real app, these dependencies would be injected or fetched from app state.
-# We'll assume they can be fetched similarly to other endpoints.
-# For simplicity, we define a stub getter.
-def get_workflow_repo() -> WorkflowRepository:
-    import backend.api.main as main
-    if not main.workflow_repo:
-        raise HTTPException(status_code=500, detail="Repository not initialized")
-    return main.workflow_repo
-
-def get_message_bus() -> MessageBus:
-    import backend.api.main as main
-    if not main.message_bus:
-        raise HTTPException(status_code=500, detail="Message bus not initialized")
-    return main.message_bus
-
 router = APIRouter(prefix="/approvals", tags=["approvals"])
 
-@router.get("", response_model=List[ApprovalRequest])
+
+def _get_factory(request: Request):
+    factory = getattr(request.app.state, "factory", None)
+    if not factory:
+        raise HTTPException(status_code=500, detail="Server not initialized")
+    return factory
+
+
+def _approval_field(approval, key: str):
+    if isinstance(approval, dict):
+        return approval.get(key)
+    return getattr(approval, key, None)
+
+
+@router.get("")
 async def list_approvals(
-    user_id: str = Depends(get_current_user),
-    repo: WorkflowRepository = Depends(get_workflow_repo)
+    request: Request,
+    user: AuthenticatedUser = Depends(get_current_user),
 ):
     """List all pending approvals for the authenticated user."""
-    return repo.list_pending_approvals(user_id)
+    factory = _get_factory(request)
+    approvals = await maybe_await(factory.workflow_repo.list_pending_approvals(user.user_id))
+    return {"approvals": approvals, "count": len(approvals)}
+
 
 @router.post("/{approval_id}/approve")
 async def approve_request(
     approval_id: str,
-    user_id: str = Depends(get_current_user),
-    repo: WorkflowRepository = Depends(get_workflow_repo),
-    bus: MessageBus = Depends(get_message_bus)
+    request: Request,
+    user: AuthenticatedUser = Depends(get_current_user),
 ):
     """Approve a pending request and resume the workflow."""
-    approval = repo.get_approval(approval_id)
+    factory = _get_factory(request)
+    repo = factory.workflow_repo
+
+    approval = await maybe_await(repo.get_approval(approval_id))
     if not approval:
         raise HTTPException(status_code=404, detail="Approval request not found")
-        
-    # Enforce ownership
-    if approval.user_id != user_id:
+
+    if _approval_field(approval, "user_id") != user.user_id and not user.is_admin():
         raise HTTPException(status_code=403, detail="Not authorized to access this approval")
-        
-    # Atomic resolution
-    success = repo.resolve_approval(approval_id, ApprovalStatus.APPROVED.value, decision_by=user_id)
+
+    success = await maybe_await(
+        repo.resolve_approval(approval_id, ApprovalStatus.APPROVED.value, decision_by=user.user_id)
+    )
     if not success:
         raise HTTPException(status_code=409, detail="Approval already resolved or not pending")
-        
-    # Resume the workflow task
-    event = TaskTriggerEvent(
-        workflow_id=approval.workflow_id,
-        run_id=approval.run_id,
-        task_id=approval.task_id
-    )
-    
-    # We must also fetch the task and transition it back to PENDING so the worker can claim it
-    run = repo.get_run(approval.run_id)
+
+    run_id = _approval_field(approval, "run_id")
+    task_id = _approval_field(approval, "task_id")
+    workflow_id = _approval_field(approval, "workflow_id")
+
+    # Transition the task back to PENDING with the approval bound to it
+    run = await load_run(repo, run_id)
     if run:
         for t in run.tasks:
-            if t.task_id == approval.task_id and t.status == TaskStatus.WAITING_APPROVAL:
-                # We need to inject the approved request into the task so ToolRouter can use it
+            if t.task_id == task_id and t.status == TaskStatus.WAITING_APPROVAL:
                 t.status = TaskStatus.PENDING
                 t.input_data["_approved_request_id"] = approval_id
-                repo.update_task(run.run_id, t)
+                await persist_task(repo, run.run_id, t)
                 break
-                
+
     from backend.repositories.audit_repository import ActorType
     audit_repo.log_event(AuditEvent(
         event_type="APPROVAL_GRANTED",
-        actor_id=user_id,
+        actor_id=user.user_id,
         actor_type=ActorType.USER,
         resource_id=approval_id,
-        workflow_id=approval.workflow_id,
-        run_id=approval.run_id,
-        task_id=approval.task_id,
-        details={"workflow_id": approval.workflow_id, "task_id": approval.task_id}
+        workflow_id=workflow_id,
+        run_id=run_id,
+        task_id=task_id,
+        details={"workflow_id": workflow_id, "task_id": task_id}
     ))
-                
-    await bus.publish("agentos-workflow-events", event)
-    
+
+    event = TaskTriggerEvent(workflow_id=workflow_id, run_id=run_id, task_id=task_id)
+    await factory.message_bus.publish("agentos-workflow-events", event)
+
     return {"status": "success", "message": "Approval granted"}
+
 
 @router.post("/{approval_id}/reject")
 async def reject_request(
     approval_id: str,
-    user_id: str = Depends(get_current_user),
-    repo: WorkflowRepository = Depends(get_workflow_repo),
-    bus: MessageBus = Depends(get_message_bus)
+    request: Request,
+    user: AuthenticatedUser = Depends(get_current_user),
 ):
     """Reject a pending request, causing the workflow task to fail."""
-    approval = repo.get_approval(approval_id)
+    factory = _get_factory(request)
+    repo = factory.workflow_repo
+
+    approval = await maybe_await(repo.get_approval(approval_id))
     if not approval:
         raise HTTPException(status_code=404, detail="Approval request not found")
-        
-    if approval.user_id != user_id:
+
+    if _approval_field(approval, "user_id") != user.user_id and not user.is_admin():
         raise HTTPException(status_code=403, detail="Not authorized to access this approval")
-        
-    success = repo.resolve_approval(approval_id, ApprovalStatus.REJECTED.value, decision_by=user_id)
+
+    success = await maybe_await(
+        repo.resolve_approval(approval_id, ApprovalStatus.REJECTED.value, decision_by=user.user_id)
+    )
     if not success:
         raise HTTPException(status_code=409, detail="Approval already resolved or not pending")
-        
-    # Resume the task so it fails
-    run = repo.get_run(approval.run_id)
+
+    run_id = _approval_field(approval, "run_id")
+    task_id = _approval_field(approval, "task_id")
+    workflow_id = _approval_field(approval, "workflow_id")
+
+    run = await load_run(repo, run_id)
     if run:
         for t in run.tasks:
-            if t.task_id == approval.task_id and t.status == TaskStatus.WAITING_APPROVAL:
+            if t.task_id == task_id and t.status == TaskStatus.WAITING_APPROVAL:
                 t.status = TaskStatus.FAILED
                 t.error = "Human approval rejected"
-                repo.update_task(run.run_id, t)
+                await persist_task(repo, run.run_id, t)
                 break
-                
+
     from backend.repositories.audit_repository import ActorType
     audit_repo.log_event(AuditEvent(
         event_type="APPROVAL_REJECTED",
-        actor_id=user_id,
+        actor_id=user.user_id,
         actor_type=ActorType.USER,
         resource_id=approval_id,
-        workflow_id=approval.workflow_id,
-        run_id=approval.run_id,
-        task_id=approval.task_id,
-        details={"workflow_id": approval.workflow_id, "task_id": approval.task_id}
+        workflow_id=workflow_id,
+        run_id=run_id,
+        task_id=task_id,
+        details={"workflow_id": workflow_id, "task_id": task_id}
     ))
-                
-    # We don't trigger the task itself since we failed it, but we should trigger DAG evaluation
-    # to cascade the failure or cancel downstream tasks.
-    # For now, we publish a resume event just in case, or we could publish a different event.
-    # The simplest is triggering DAG evaluation directly or by an event.
-    
+
+    # Cascade the failure to downstream tasks
+    workflow_engine = getattr(request.app.state, "workflow_engine", None)
+    if workflow_engine:
+        await workflow_engine.evaluate_dag(run_id)
+
     return {"status": "success", "message": "Approval rejected"}

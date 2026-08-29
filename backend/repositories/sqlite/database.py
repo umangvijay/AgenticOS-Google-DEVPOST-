@@ -170,6 +170,24 @@ CREATE TABLE IF NOT EXISTS mcps (
 
 CREATE INDEX IF NOT EXISTS idx_mcps_owner ON mcps(owner);
 
+CREATE TABLE IF NOT EXISTS mcp_builds (
+    build_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    method TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'queued',
+    stage TEXT NOT NULL DEFAULT 'queued',
+    logs_json TEXT NOT NULL DEFAULT '[]',
+    mcp_id TEXT,
+    tools_json TEXT NOT NULL DEFAULT '[]',
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_builds_user ON mcp_builds(user_id, created_at);
+
 -- ── MCP Tool Cache ───────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS mcp_tools (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -366,8 +384,42 @@ class DatabaseManager:
     async def _run_migrations(self) -> None:
         """Create all tables if they don't exist. Idempotent."""
         await self._connection.executescript(SCHEMA_SQL)
+        await self._migrate_mcp_columns()
+        await self._migrate_workflow_thread_columns()
         await self._connection.commit()
         logger.info("Database schema migration complete")
+
+    async def _migrate_mcp_columns(self) -> None:
+        """Add columns introduced after the original schema."""
+        cursor = await self._connection.execute("PRAGMA table_info(mcps)")
+        existing = {row[1] for row in await cursor.fetchall()}
+        additions = {
+            "description": "TEXT NOT NULL DEFAULT ''",
+            "trust_tier": "TEXT NOT NULL DEFAULT 'pending_review'",
+            "source_type": "TEXT NOT NULL DEFAULT 'openapi'",
+            "spec_json": "TEXT",
+        }
+        for col, ddl in additions.items():
+            if col not in existing:
+                await self._connection.execute(f"ALTER TABLE mcps ADD COLUMN {col} {ddl}")
+
+        cursor = await self._connection.execute("PRAGMA table_info(mcp_tools)")
+        tool_cols = {row[1] for row in await cursor.fetchall()}
+        if "operation_json" not in tool_cols:
+            await self._connection.execute(
+                "ALTER TABLE mcp_tools ADD COLUMN operation_json TEXT NOT NULL DEFAULT '{}'"
+            )
+
+    async def _migrate_workflow_thread_columns(self) -> None:
+        cursor = await self._connection.execute("PRAGMA table_info(workflow_runs)")
+        cols = {row[1] for row in await cursor.fetchall()}
+        if "parent_run_id" not in cols:
+            await self._connection.execute("ALTER TABLE workflow_runs ADD COLUMN parent_run_id TEXT")
+        if "thread_id" not in cols:
+            await self._connection.execute("ALTER TABLE workflow_runs ADD COLUMN thread_id TEXT")
+        await self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_runs_thread ON workflow_runs(user_id, thread_id)"
+        )
 
     async def connection(self) -> aiosqlite.Connection:
         """Get the database connection. Raises if not initialized."""

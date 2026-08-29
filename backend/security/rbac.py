@@ -17,6 +17,7 @@ class Role(str, Enum):
     ADMIN = "admin"
     USER = "user"
     VIEWER = "viewer"
+    GUEST = "guest"
 
 
 # ── Permission Matrix ─────────────────────────────────────────────
@@ -73,7 +74,12 @@ PERMISSIONS = {
 
 def check_permission(role: str, resource_type: str, action: str) -> bool:
     """Check if a role has permission for an action on a resource type."""
-    role_enum = Role(role) if isinstance(role, str) else role
+    try:
+        role_enum = Role(role) if isinstance(role, str) else role
+    except ValueError:
+        role_enum = Role.USER
+    if role_enum == Role.GUEST:
+        role_enum = Role.USER
 
     # Check admin wildcard first
     if PERMISSIONS.get((Role.ADMIN, "*", "*")) and role_enum == Role.ADMIN:

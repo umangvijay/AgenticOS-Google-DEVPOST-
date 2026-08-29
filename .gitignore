@@ -3,11 +3,18 @@
 .env.local
 .env.*.local
 
-# Credentials
-credentials/
-*.json
-!package.json
-!package-lock.json
+# Local runtime data (do not publish inboxes, SQLite, or generated Studio apps)
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.json
+data/artifacts/
+frontend/data/contact_inbox.json
+
+# Cloud / Google credential files only (not the Vault UI)
+**/serviceAccount*.json
+**/google-credentials.json
+**/application_default_credentials.json
 
 # Python
 __pycache__/
@@ -22,11 +29,6 @@ node_modules/
 
 # Security keys
 backend/security/keys/*.pem
-
-# Local database
-data/*.db
-data/*.db-shm
-data/*.db-wal
 
 # Local logs
 *.log

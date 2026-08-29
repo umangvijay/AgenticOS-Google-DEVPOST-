@@ -6,6 +6,8 @@ Policy: 8+ chars, upper/lower/digit/special.
 Common password rejection. Lockout: 5 failures → 15 min.
 """
 
+import hashlib
+import hmac
 import re
 import logging
 from datetime import datetime, timezone, timedelta
@@ -32,19 +34,34 @@ COMMON_PASSWORDS = frozenset({
 })
 
 
+def _material(password: str) -> bytes:
+    """Bytes fed to bcrypt. HMAC-SHA256 pepper when PASSWORD_PEPPER is set (64 hex chars)."""
+    from backend.config.settings import settings
+    pepper = (settings.PASSWORD_PEPPER or "").encode("utf-8")
+    raw = password.encode("utf-8")
+    if not pepper:
+        return raw[:MAX_LENGTH]
+    return hmac.new(pepper, raw, hashlib.sha256).hexdigest().encode("utf-8")
+
+
 def hash_password(password: str) -> str:
-    """Hash a password using bcrypt with auto-generated salt."""
-    password_bytes = password.encode("utf-8")
+    """Hash a password using bcrypt (cost 12) after an optional HMAC pepper."""
     salt = bcrypt.gensalt(rounds=12)
-    return bcrypt.hashpw(password_bytes, salt).decode("utf-8")
+    return bcrypt.hashpw(_material(password), salt).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its bcrypt hash. Timing-safe."""
-    return bcrypt.checkpw(
-        plain_password.encode("utf-8"),
-        hashed_password.encode("utf-8"),
-    )
+    """Verify a password. Tries peppered material first, then legacy unpeppered bcrypt."""
+    stored = hashed_password.encode("utf-8")
+    try:
+        if bcrypt.checkpw(_material(plain_password), stored):
+            return True
+    except ValueError:
+        return False
+    try:
+        return bcrypt.checkpw(plain_password.encode("utf-8")[:MAX_LENGTH], stored)
+    except ValueError:
+        return False
 
 
 def validate_password_strength(password: str) -> Tuple[bool, Optional[str]]:

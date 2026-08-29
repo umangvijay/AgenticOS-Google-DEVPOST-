@@ -28,8 +28,9 @@ class SQLiteMCPRepository(BaseMCPRepository):
             INSERT INTO mcps (
                 mcp_id, name, version, endpoint, transport, auth_json, scopes,
                 health, health_updated_at, state, spec_hash, spec_version,
-                source_uri, built_at, owner, is_enabled, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                source_uri, built_at, owner, is_enabled, created_at, updated_at,
+                description, trust_tier, source_type, spec_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(mcp_id) DO UPDATE SET
                 name = excluded.name,
                 version = excluded.version,
@@ -42,14 +43,20 @@ class SQLiteMCPRepository(BaseMCPRepository):
                 spec_version = excluded.spec_version,
                 source_uri = excluded.source_uri,
                 built_at = excluded.built_at,
+                owner = excluded.owner,
+                is_enabled = excluded.is_enabled,
+                description = excluded.description,
+                trust_tier = excluded.trust_tier,
+                source_type = excluded.source_type,
+                spec_json = excluded.spec_json,
                 updated_at = excluded.updated_at
             """,
             (
                 m["mcp_id"],
                 m["name"],
-                m["version"],
-                m["endpoint"],
-                m["transport"],
+                m.get("version", "1.0.0"),
+                m.get("endpoint", f"internal://openapi/{m['mcp_id']}"),
+                m.get("transport", "internal"),
                 json.dumps(m.get("auth", {})),
                 json.dumps(m.get("scopes", [])),
                 m.get("health", "UNKNOWN"),
@@ -63,6 +70,10 @@ class SQLiteMCPRepository(BaseMCPRepository):
                 1 if m.get("is_enabled", True) else 0,
                 m.get("created_at", now),
                 now,
+                m.get("description", ""),
+                m.get("trust_tier", "pending_review"),
+                m.get("source_type", "openapi"),
+                m.get("spec_json"),
             ),
         )
         await self.db.commit()
@@ -95,6 +106,13 @@ class SQLiteMCPRepository(BaseMCPRepository):
         )
         await self.db.commit()
 
+    async def update_mcp_auth(self, mcp_id: str, auth: Dict[str, Any]) -> None:
+        await self.db.execute(
+            "UPDATE mcps SET auth_json = ?, updated_at = ? WHERE mcp_id = ?",
+            (json.dumps(auth), datetime.now(timezone.utc).isoformat(), mcp_id),
+        )
+        await self.db.commit()
+
     async def update_mcp_state(self, mcp_id: str, state: str) -> None:
         await self.db.execute(
             "UPDATE mcps SET state = ?, updated_at = ? WHERE mcp_id = ?",
@@ -115,23 +133,39 @@ class SQLiteMCPRepository(BaseMCPRepository):
         await conn.execute("DELETE FROM mcp_tools WHERE mcp_id = ?", (mcp_id,))
         # Insert new tools
         for tool in tools:
+            auth_reqs = tool.get("auth_requirements", [])
+            if auth_reqs and hasattr(auth_reqs[0], "model_dump"):
+                auth_reqs = [a.model_dump() if hasattr(a, "model_dump") else a for a in auth_reqs]
+            operation = tool.get("operation") or {}
+            if hasattr(operation, "model_dump"):
+                operation = operation.model_dump()
+            risk = tool.get("risk_level", 4)
+            if hasattr(risk, "value"):
+                risk = risk.value
+            discovered = tool.get("discovered_at") or datetime.now(timezone.utc).isoformat()
+            expires = tool.get("expires_at") or datetime.now(timezone.utc).isoformat()
+            if hasattr(discovered, "isoformat"):
+                discovered = discovered.isoformat()
+            if hasattr(expires, "isoformat"):
+                expires = expires.isoformat()
             await conn.execute(
                 """
                 INSERT INTO mcp_tools (
                     tool_name, description, input_schema, mcp_id, mcp_version,
-                    discovered_at, expires_at, auth_requirements, risk_level
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    discovered_at, expires_at, auth_requirements, risk_level, operation_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    tool["tool_name"],
-                    tool["description"],
-                    json.dumps(tool["input_schema"]),
+                    tool.get("tool_name") or tool.get("name") or "unknown",
+                    tool.get("description", ""),
+                    json.dumps(tool.get("input_schema") or tool.get("inputSchema") or {}),
                     mcp_id,
-                    tool["mcp_version"],
-                    tool["discovered_at"],
-                    tool["expires_at"],
-                    json.dumps(tool.get("auth_requirements", [])),
-                    tool.get("risk_level", 4),
+                    tool.get("mcp_version", "1.0.0"),
+                    discovered,
+                    expires,
+                    json.dumps(auth_reqs),
+                    int(risk) if risk is not None else 4,
+                    json.dumps(operation),
                 ),
             )
         await conn.commit()
@@ -147,17 +181,91 @@ class SQLiteMCPRepository(BaseMCPRepository):
         results = []
         for row in rows:
             r = dict(row)
-            r["input_schema"] = json.loads(r.get("input_schema", "{}"))
-            r["auth_requirements"] = json.loads(r.get("auth_requirements", "[]"))
+            r["input_schema"] = json.loads(r.get("input_schema") or "{}")
+            r["auth_requirements"] = json.loads(r.get("auth_requirements") or "[]")
+            r["operation"] = json.loads(r.get("operation_json") or "{}")
+            r["name"] = r.get("tool_name")
+            r["inputSchema"] = r["input_schema"]
             results.append(r)
         return results
+
+    async def create_build(self, build: Dict[str, Any]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        await self.db.execute(
+            """
+            INSERT INTO mcp_builds (
+                build_id, user_id, name, method, source, status, stage,
+                logs_json, mcp_id, tools_json, error, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                build["build_id"],
+                build["user_id"],
+                build.get("name") or "",
+                build.get("method") or "url",
+                build.get("source") or "",
+                build.get("status", "queued"),
+                build.get("stage", "queued"),
+                json.dumps(build.get("logs") or []),
+                build.get("mcp_id"),
+                json.dumps(build.get("tools") or []),
+                build.get("error"),
+                now,
+                now,
+            ),
+        )
+        await self.db.commit()
+
+    async def update_build(self, build_id: str, updates: Dict[str, Any]) -> None:
+        if not updates:
+            return
+        mapping = {
+            "logs": "logs_json",
+            "tools": "tools_json",
+        }
+        set_clauses = []
+        values = []
+        for key, value in updates.items():
+            col = mapping.get(key, key)
+            set_clauses.append(f"{col} = ?")
+            if key in ("logs", "tools") or isinstance(value, (dict, list)):
+                values.append(json.dumps(value))
+            else:
+                values.append(value)
+        values.append(datetime.now(timezone.utc).isoformat())
+        values.append(build_id)
+        await self.db.execute(
+            f"UPDATE mcp_builds SET {', '.join(set_clauses)}, updated_at = ? WHERE build_id = ?",
+            tuple(values),
+        )
+        await self.db.commit()
+
+    async def get_build(self, build_id: str) -> Optional[Dict[str, Any]]:
+        row = await self.db.fetch_one("SELECT * FROM mcp_builds WHERE build_id = ?", (build_id,))
+        return self._build_row(row) if row else None
+
+    @staticmethod
+    def _build_row(row: dict) -> Optional[Dict[str, Any]]:
+        if not row:
+            return None
+        r = dict(row)
+        r["logs"] = json.loads(r.pop("logs_json", "[]") or "[]")
+        r["tools"] = json.loads(r.pop("tools_json", "[]") or "[]")
+        return r
 
     @staticmethod
     def _row_to_dict(row: dict) -> Optional[Dict[str, Any]]:
         if not row:
             return None
         result = dict(row)
-        result["auth"] = json.loads(result.pop("auth_json", "{}"))
-        result["scopes"] = json.loads(result.get("scopes", "[]"))
+        result["auth"] = json.loads(result.pop("auth_json", None) or "{}")
+        scopes_raw = result.get("scopes") or "[]"
+        if isinstance(scopes_raw, str):
+            try:
+                result["scopes"] = json.loads(scopes_raw)
+            except json.JSONDecodeError:
+                result["scopes"] = []
+        elif not isinstance(scopes_raw, list):
+            result["scopes"] = []
         result["is_enabled"] = bool(result.get("is_enabled", 1))
         return result

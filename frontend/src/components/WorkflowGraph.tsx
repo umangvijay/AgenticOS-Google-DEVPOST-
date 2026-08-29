@@ -93,7 +93,7 @@ export default function WorkflowGraph({ workflow }: { workflow: WorkflowRun }) {
                 <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{task.status}</span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
-                {task.tool || 'No tool specified'}
+                {task.tool || (typeof task.input_data?.name === 'string' && task.input_data.name) || task.agent}
               </div>
             </div>
           )

@@ -41,7 +41,7 @@ export default function ExecutionTimeline({ events }: { events: WorkflowEvent[] 
               <div className="flex-1 space-y-1">
                 <p className="text-sm font-medium leading-none text-foreground">{event.summary}</p>
                 <div className="flex items-center text-xs text-muted-foreground space-x-2">
-                  <span>{format(new Date(event.timestamp), "HH:mm:ss.SSS")}</span>
+                  <span>{event.timestamp ? format(new Date(event.timestamp), "HH:mm:ss") : ""}</span>
                   {event.task_id && <span className="px-1.5 py-0.5 bg-muted rounded font-mono text-[10px]">{event.task_id}</span>}
                 </div>
               </div>

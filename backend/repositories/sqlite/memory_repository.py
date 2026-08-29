@@ -108,6 +108,35 @@ class SQLiteMemoryRepository(BaseMemoryRepository):
         scored.sort(key=lambda x: x["similarity_score"], reverse=True)
         return scored[:limit]
 
+    async def list_memories(
+        self,
+        user_id: str,
+        memory_type: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        if memory_type:
+            rows = await self.db.fetch_all(
+                "SELECT * FROM memories WHERE user_id = ? AND memory_type = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (user_id, memory_type, limit, offset),
+            )
+        else:
+            rows = await self.db.fetch_all(
+                "SELECT * FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (user_id, limit, offset),
+            )
+        return [
+            {
+                "id": r["id"],
+                "user_id": r["user_id"],
+                "content": r["content"],
+                "memory_type": r["memory_type"],
+                "metadata": json.loads(r.get("metadata") or "{}"),
+                "created_at": r["created_at"],
+            }
+            for r in rows
+        ]
+
     async def delete_memory(self, user_id: str, memory_id: str) -> bool:
         conn = await self.db.connection()
         cursor = await conn.execute(

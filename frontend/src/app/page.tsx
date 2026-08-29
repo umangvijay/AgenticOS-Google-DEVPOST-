@@ -1,119 +1,59 @@
 import Link from "next/link";
+import PublicNavbar from "@/components/PublicNavbar";
+import { DiagramScaler } from "@/components/DiagramScaler";
 
 export default function LandingPage() {
   return (
     <div className="mesh-gradient" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      {/* Splash Screen */}
-      <div className="splash-screen">
-        <h1 className="splash-text">A G E N T O S</h1>
-      </div>
+      <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+        <PublicNavbar />
 
-      {/* Navbar */}
-      <header style={{
-        padding: "20px 40px", display: "flex", justifyContent: "space-between", alignItems: "center",
-        borderBottom: "1px solid var(--border-primary)", backdropFilter: "blur(12px)",
-        position: "sticky", top: 0, zIndex: 100
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: "8px",
-            background: "linear-gradient(135deg, var(--accent), var(--accent-pink))",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 16, fontWeight: 800, color: "white",
-            boxShadow: "0 0 15px rgba(236, 72, 153, 0.4)"
+      <main className="px-4 pb-12 md:py-24" style={{ paddingTop: 32, textAlign: "center", position: "relative" }}>
+        <div style={{ zIndex: 10, width: "100%" }}>
+          <p className="eyebrow">Autonomous workspace</p>
+          <h1 className="mt-4 md:mt-10 apple-hero" style={{
+            fontSize: "clamp(36px, 8vw, 84px)", fontWeight: 900, lineHeight: 1.05,
+            letterSpacing: "-0.04em", marginBottom: 24, maxWidth: 1000, marginInline: "auto"
           }}>
-            A
-          </div>
-          <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.5px" }} className="gradient-text">
-            AgentOS
-          </span>
-        </div>
-        <div style={{ display: "flex", gap: 32, alignItems: "center" }}>
-          <nav style={{ display: "flex", gap: 32, fontSize: 14, fontWeight: 600, color: "var(--text-secondary)" }}>
-            <Link href="/about" className="hover:text-primary transition-colors" style={{ color: "var(--text-primary)" }}>About Us</Link>
-            <Link href="/features" className="hover:text-primary transition-colors">Features</Link>
-            <Link href="/integrations" className="hover:text-primary transition-colors">Marketplace</Link>
-            <Link href="/contact" className="hover:text-primary transition-colors">Contact Us</Link>
-          </nav>
-          <div style={{ display: "flex", gap: 16 }}>
-            <Link href="/login" className="btn btn-ghost">Sign In</Link>
-            <Link href="/get-started" className="btn btn-primary">Get Started</Link>
-          </div>
-        </div>
-      </header>
-
-      {/* Hero Section */}
-      <main style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "100px 20px", textAlign: "center", position: "relative" }}>
-        
-        {/* Floating Background SVG paths */}
-        <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", opacity: 0.5 }}>
-          <svg width="100%" height="100%" style={{ position: "absolute" }}>
-            <path d="M -100 200 C 300 200, 400 600, 1000 400" stroke="var(--border-hover)" strokeWidth="2" fill="none" className="animate-dash" strokeDasharray="10 15" />
-            <path d="M -100 600 C 500 500, 600 100, 1200 300" stroke="var(--border-hover)" strokeWidth="1" fill="none" className="animate-dash" strokeDasharray="5 15" style={{ animationDuration: "30s" }} />
-          </svg>
-        </div>
-
-        <div style={{ zIndex: 10 }}>
-          <div className="badge animate-fade-in-up" style={{ marginBottom: 32, padding: "6px 16px", background: "rgba(236, 72, 153, 0.1)", color: "var(--accent-pink)", border: "1px solid rgba(236, 72, 153, 0.3)", borderRadius: 100 }}>
-            Production Ready v2.0
-          </div>
-          <h1 className="animate-fade-in-up" style={{
-            fontSize: "clamp(48px, 8vw, 84px)", fontWeight: 900, lineHeight: 1.05,
-            letterSpacing: "-0.04em", marginBottom: 24, maxWidth: 1000
-          }}>
-            The autonomous workspace that <br/>
-            <span className="gradient-text">builds its own tools.</span>
+            Meet AgentOS.<br className="hidden md:block" />
+            <span className="gradient-text">One workspace for all your apps.</span>
           </h1>
-          <p className="animate-fade-in-up" style={{
+          <p style={{
             fontSize: "clamp(18px, 2.5vw, 24px)", color: "var(--text-secondary)",
-            marginBottom: 48, maxWidth: 700, animationDelay: "0.1s", margin: "0 auto 48px", fontWeight: 400
+            marginBottom: 48, maxWidth: 700, margin: "0 auto 48px", fontWeight: 400
           }}>
-            Give AgentOS a goal. It plans the workflow, executes the tasks, and if an integration is missing, it dynamically generates and deploys it.
+            Tell it what you want. It plans the work, builds missing MCP tools, and executes across live APIs — not just chat.
           </p>
-          <div className="animate-fade-in-up" style={{ display: "flex", gap: 16, justifyContent: "center", animationDelay: "0.2s" }}>
-            <Link href="/get-started" className="btn btn-primary btn-lg">Start Building Free</Link>
-            <a href="#demo" className="btn btn-secondary btn-lg">Watch how it works</a>
+          <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap", marginBottom: 24 }}>
+            <Link href="/login" className="btn btn-primary btn-lg">Sign In</Link>
+            <Link href="/get-started" className="btn btn-secondary btn-lg">Start Building Free</Link>
+            <Link href="/docs" className="btn btn-ghost btn-lg">Read the docs</Link>
           </div>
         </div>
 
-        {/* Animated Node Demo */}
-        <div id="demo" className="animate-fade-in-up glass-card" style={{
-          marginTop: 80, width: "100%", maxWidth: 1000, height: 450,
-          background: "var(--bg-secondary)", animationDelay: "0.3s", position: "relative",
-          zIndex: 10
-        }}>
-          {/* Header */}
+        <div style={{ marginTop: 80, zIndex: 10 }}>
+          <DiagramScaler>
+            <div id="demo" style={{ background: "var(--bg-secondary)", borderRadius: 16, border: "1px solid var(--border-primary)", boxShadow: "var(--shadow-lg)", overflow: "hidden", width: "100%", height: "100%", position: "relative" }}>
           <div style={{
             height: 48, borderBottom: "1px solid var(--border-primary)",
             display: "flex", alignItems: "center", padding: "0 16px", gap: 8,
-            background: "rgba(0,0,0,0.2)"
+            background: "rgba(0,0,0,0.05)"
           }}>
             <div style={{ width: 12, height: 12, borderRadius: "50%", background: "var(--error)" }} />
             <div style={{ width: 12, height: 12, borderRadius: "50%", background: "var(--warning)" }} />
             <div style={{ width: 12, height: 12, borderRadius: "50%", background: "var(--success)" }} />
             <span style={{ marginLeft: 16, fontSize: 13, color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>workflow-engine-active</span>
           </div>
-
-          {/* SVG Connections */}
           <svg style={{ position: "absolute", top: 48, left: 0, width: "100%", height: "calc(100% - 48px)", pointerEvents: "none" }}>
-            {/* Curved Path 1 */}
-            <path d="M 230 150 C 350 150, 400 100, 500 100" stroke="var(--accent-pink)" strokeWidth="3" fill="none" strokeOpacity="0.3" />
-            <path d="M 230 150 C 350 150, 400 100, 500 100" stroke="var(--accent-pink)" strokeWidth="2" fill="none" className="animate-dash" strokeDasharray="10 20" />
-            
-            {/* Curved Path 2 */}
-            <path d="M 230 150 C 350 150, 350 250, 500 250" stroke="var(--accent-purple)" strokeWidth="3" fill="none" strokeOpacity="0.3" />
-            <path d="M 230 150 C 350 150, 350 250, 500 250" stroke="var(--accent-purple)" strokeWidth="2" fill="none" className="animate-dash" strokeDasharray="10 20" />
-
-            {/* Curved Path 3 */}
-            <path d="M 720 100 C 800 100, 800 150, 850 150" stroke="var(--accent)" strokeWidth="3" fill="none" strokeOpacity="0.3" />
-            <path d="M 720 100 C 800 100, 800 150, 850 150" stroke="var(--accent)" strokeWidth="2" fill="none" className="animate-dash" strokeDasharray="10 20" />
+            <path d="M 210 150 C 310 150, 360 100, 460 100" stroke="var(--accent-pink)" strokeWidth="3" fill="none" strokeOpacity="0.3" />
+            <path d="M 210 150 C 310 150, 360 100, 460 100" stroke="var(--accent-pink)" strokeWidth="2" fill="none" className="animate-dash" strokeDasharray="10 20" />
+            <path d="M 210 150 C 310 150, 310 250, 460 250" stroke="var(--accent-purple)" strokeWidth="3" fill="none" strokeOpacity="0.3" />
+            <path d="M 210 150 C 310 150, 310 250, 460 250" stroke="var(--accent-purple)" strokeWidth="2" fill="none" className="animate-dash" strokeDasharray="10 20" />
+            <path d="M 680 100 C 715 100, 715 150, 750 150" stroke="var(--accent)" strokeWidth="3" fill="none" strokeOpacity="0.3" />
+            <path d="M 680 100 C 715 100, 715 150, 750 150" stroke="var(--accent)" strokeWidth="2" fill="none" className="animate-dash" strokeDasharray="10 20" />
           </svg>
-
-          {/* Nodes */}
           <div style={{ position: "absolute", top: 48, left: 0, width: "100%", height: "calc(100% - 48px)" }}>
-            
-            {/* Trigger Node */}
-            <div className="node-card animate-float" style={{ position: "absolute", left: 60, top: 120, width: 170 }}>
+            <div className="node-card" style={{ position: "absolute", left: 40, top: 120, width: 170 }}>
               <div style={{ fontSize: 24 }}>⚡</div>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>User Intent</div>
@@ -121,20 +61,16 @@ export default function LandingPage() {
               </div>
               <div className="node-port right"></div>
             </div>
-
-            {/* MCP Factory Node */}
-            <div className="node-card animate-float" style={{ position: "absolute", left: 500, top: 70, width: 220, animationDelay: "1s" }}>
+            <div className="node-card" style={{ position: "absolute", left: 460, top: 70, width: 220, animationDelay: "1s" }}>
               <div className="node-port left"></div>
               <div style={{ fontSize: 24 }}>🛠️</div>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>MCP Factory</div>
-                <div style={{ fontSize: 11, color: "var(--accent-pink)", fontWeight: 600 }}>Building Notion API...</div>
+                <div style={{ fontSize: 11, color: "var(--accent-pink)", fontWeight: 600 }}>Building tools…</div>
               </div>
               <div className="node-port right"></div>
             </div>
-
-            {/* Web Search Node */}
-            <div className="node-card animate-float" style={{ position: "absolute", left: 500, top: 220, width: 220, animationDelay: "2s", opacity: 0.7 }}>
+            <div className="node-card" style={{ position: "absolute", left: 460, top: 220, width: 220, animationDelay: "2s", opacity: 0.7 }}>
               <div className="node-port left"></div>
               <div style={{ fontSize: 24 }}>🌐</div>
               <div>
@@ -142,32 +78,54 @@ export default function LandingPage() {
                 <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>Completed</div>
               </div>
             </div>
-
-            {/* Execution Node */}
-            <div className="node-card animate-float" style={{ position: "absolute", left: 850, top: 120, width: 170, animationDelay: "1.5s" }}>
+            <div className="node-card" style={{ position: "absolute", left: 750, top: 120, width: 200, animationDelay: "1.5s" }}>
               <div className="node-port left"></div>
               <div style={{ fontSize: 24 }}>✅</div>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>Notion Sync</div>
-                <div style={{ fontSize: 11, color: "var(--success)" }}>Data inserted</div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>Live execution</div>
+                <div style={{ fontSize: 11, color: "var(--success)" }}>Result returned</div>
               </div>
             </div>
-
           </div>
+          </div>
+          </DiagramScaler>
         </div>
       </main>
 
-      {/* App Integrations Marquee Showcase */}
+      <section className="py-20 md:py-28 px-5">
+        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+          <p className="eyebrow" style={{ textAlign: "center" }}>Why we exist</p>
+          <h2 style={{ textAlign: "center", fontSize: "clamp(32px, 5vw, 52px)", fontWeight: 800, marginBottom: 48, letterSpacing: "-0.03em" }}>
+            Vision and mission
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="glass-panel p-8 md:p-10">
+              <h3 style={{ fontSize: 28, fontFamily: "var(--font-serif)", marginBottom: 16 }}>Vision</h3>
+              <p style={{ color: "var(--text-secondary)", fontSize: 18, lineHeight: 1.7 }}>
+                A workspace where you describe the outcome — and the system grows the tools it needs.
+                No frozen integration catalog. No waiting for a vendor plugin. Any app with an API, or a site you can log into, becomes usable the moment you ask.
+              </p>
+            </div>
+            <div className="glass-panel p-8 md:p-10">
+              <h3 style={{ fontSize: 28, fontFamily: "var(--font-serif)", marginBottom: 16 }}>Mission</h3>
+              <p style={{ color: "var(--text-secondary)", fontSize: 18, lineHeight: 1.7 }}>
+                Give people an autonomous agent that plans, builds missing MCP tools, and executes in real time —
+                with encrypted vaults, human approvals, and the option to bring your own Gemini key.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section style={{ padding: "60px 0", background: "var(--bg-primary)", position: "relative", overflow: "hidden" }}>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
           <p style={{ fontSize: 14, fontWeight: 600, color: "var(--text-tertiary)", letterSpacing: 2, textTransform: "uppercase" }}>
-            Connects with your favorite tools
+            Connects with any HTTP API
           </p>
         </div>
         <div className="marquee-container animate-fade-in-up">
           <div className="marquee-content" style={{ display: "flex", gap: 64, alignItems: "center" }}>
-            {/* Repeated logos for infinite scroll effect */}
-            {Array.from({ length: 3 }).map((_, i) => (
+            {Array.from({ length: 2 }).map((_, i) => (
               <div key={i} style={{ display: "flex", gap: 64, alignItems: "center" }}>
                 <span style={{ fontSize: 32, fontWeight: 700, color: "var(--text-secondary)" }}>Stripe</span>
                 <span style={{ fontSize: 32, fontWeight: 700, color: "var(--text-secondary)" }}>Slack</span>
@@ -183,110 +141,113 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Features Grid Section */}
-      <section style={{ padding: "120px 20px", background: "var(--bg-primary)", position: "relative" }}>
+      <section className="py-20 md:py-28 px-5">
+        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+          <p className="eyebrow" style={{ textAlign: "center" }}>Automation pipeline</p>
+          <h2 className="apple-hero" style={{ textAlign: "center", fontSize: "clamp(32px, 5vw, 48px)", marginBottom: 40 }}>
+            AI that executes work, not just chat.
+          </h2>
+          <div className="pipeline-steps">
+            {[
+              ["01", "Intent", "Parse the goal, the target app, and constraints from plain language."],
+              ["02", "Plan", "Break the goal into a DAG of tasks the engine can run."],
+              ["03", "Build tools", "If an API is missing, the MCP factory writes and probes it live."],
+              ["04", "Execute", "HTTP, health, email, browser, and generated tools run in order."],
+              ["05", "Recover", "Retries, circuit breakers, and human approvals when risk is high."],
+              ["06", "Report", "The workspace thread shows events and real task output."],
+            ].map(([n, t, d]) => (
+              <div key={n} className="glass-panel pipeline-step">
+                <div className="gradient-text" style={{ fontSize: 28, fontWeight: 800, marginBottom: 8 }}>{n}</div>
+                <h3 style={{ fontSize: 20, margin: "0 0 8px" }}>{t}</h3>
+                <p style={{ margin: 0, color: "var(--text-secondary)", lineHeight: 1.6 }}>{d}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="py-20 md:py-32 px-5 relative" style={{ background: "var(--bg-primary)" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto" }}>
           <div style={{ textAlign: "center", marginBottom: 80 }}>
             <h2 className="animate-fade-in-up" style={{ fontSize: "clamp(32px, 5vw, 56px)", fontWeight: 800, marginBottom: 24 }}>
               Everything you need to <span className="gradient-text">automate anything.</span>
             </h2>
             <p style={{ fontSize: 20, color: "var(--text-secondary)", maxWidth: 600, margin: "0 auto" }}>
-              AgentOS combines the power of LLMs with deterministic workflow execution.
+              AgentOS combines live model reasoning with deterministic workflow execution.
             </p>
           </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 32 }}>
-            <div className="glass-card animate-fade-in-up" style={{ padding: 40, borderTop: "2px solid var(--accent-pink)" }}>
-              <div style={{ fontSize: 40, marginBottom: 24 }}>🧠</div>
-              <h3 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>Autonomous Planning</h3>
-              <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                Give AgentOS a high-level goal, and it will break it down into a DAG of executable tasks, routing them to specialized sub-agents.
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <div className="glass-panel animate-fade-in-up p-6 md:p-8 border-t-2 border-[var(--accent-pink)]">
+              <h3 className="text-xl md:text-2xl font-bold mb-4">Autonomous Planning</h3>
+              <p className="text-[var(--text-secondary)] leading-relaxed">
+                Give AgentOS a high-level goal. It breaks it into a DAG of tasks and routes them to specialized agents.
               </p>
             </div>
-            
-            <div className="glass-card animate-fade-in-up" style={{ padding: 40, borderTop: "2px solid var(--accent-purple)", animationDelay: "0.1s" }}>
-              <div style={{ fontSize: 40, marginBottom: 24 }}>🛠️</div>
-              <h3 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>Dynamic MCP Builder</h3>
-              <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                Missing an API connector? AgentOS will search the web, read the docs, and write the Python MCP connector from scratch.
+            <div className="glass-panel animate-fade-in-up p-6 md:p-8 border-t-2 border-[var(--accent-purple)]">
+              <h3 className="text-xl md:text-2xl font-bold mb-4">Dynamic MCP Builder</h3>
+              <p className="text-[var(--text-secondary)] leading-relaxed">
+                Missing an API connector? AgentOS reads the docs and registers tools it can call in the same run.
               </p>
             </div>
-            
-            <div className="glass-card animate-fade-in-up" style={{ padding: 40, borderTop: "2px solid var(--accent)", animationDelay: "0.2s" }}>
-              <div style={{ fontSize: 40, marginBottom: 24 }}>🔒</div>
-              <h3 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>Enterprise Security</h3>
-              <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                Built with full AST static analysis, sandboxed Docker execution, Google OAuth, and strict CSP headers.
+            <div className="glass-panel animate-fade-in-up p-6 md:p-8 border-t-2 border-[var(--accent)]">
+              <h3 className="text-xl md:text-2xl font-bold mb-4">Your keys, your quota</h3>
+              <p className="text-[var(--text-secondary)] leading-relaxed">
+                Bring a Gemini API key in Settings. It is encrypted in the vault and used for your runs.
               </p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* How it Works Section */}
-      <section style={{ padding: "120px 20px", position: "relative", overflow: "hidden" }}>
-        <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, background: "linear-gradient(180deg, var(--bg-primary) 0%, rgba(139, 92, 246, 0.05) 100%)", zIndex: -1 }} />
+      <section className="py-20 md:py-32 px-5 relative overflow-hidden">
         <div style={{ maxWidth: 1000, margin: "0 auto" }}>
           <div style={{ textAlign: "center", marginBottom: 80 }}>
-            <h2 style={{ fontSize: "clamp(32px, 5vw, 56px)", fontWeight: 800, marginBottom: 24 }}>
-              How AgentOS Works
-            </h2>
+            <h2 style={{ fontSize: "clamp(32px, 5vw, 56px)", fontWeight: 800, marginBottom: 24 }}>How AgentOS Works</h2>
           </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 64 }}>
-            {/* Step 1 */}
-            <div style={{ display: "flex", gap: 40, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ flex: "1 1 400px" }}>
-                <div style={{ fontSize: 80, fontWeight: 900, color: "var(--border-hover)", lineHeight: 1, marginBottom: 24 }}>01</div>
-                <h3 style={{ fontSize: 32, fontWeight: 700, marginBottom: 16 }}>Define your Intent</h3>
+          <div className="flex flex-col gap-16 md:gap-24">
+            <div className="flex flex-col lg:flex-row gap-10 items-center">
+              <div className="flex-1 w-full">
+                <div className="gradient-text" style={{ fontSize: 80, fontWeight: 900, lineHeight: 1, marginBottom: 24, opacity: 0.8 }}>01</div>
+                <h3 style={{ fontSize: 32, fontWeight: 700, marginBottom: 16 }}>Define your intent</h3>
                 <p style={{ fontSize: 18, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                  Start by typing what you want to achieve. No coding required. The Intent Agent parses your request and maps it to the necessary systems.
+                  Type what you want. The intent agent maps it onto the tools you already have — or the ones it will build.
                 </p>
               </div>
-              <div className="glass-card" style={{ flex: "1 1 400px", padding: 32, background: "rgba(0,0,0,0.4)" }}>
+              <div className="glass-panel flex-1 w-full p-8" style={{ background: "rgba(43,42,39,0.92)", color: "white" }}>
                 <div style={{ fontFamily: "var(--font-mono)", color: "var(--success)" }}>
-                  &gt; Goal: Analyze our latest Stripe transactions and generate a PDF report.
+                  &gt; Goal: Check health of https://example.com and report the status code.
                 </div>
               </div>
             </div>
-
-            {/* Step 2 */}
-            <div style={{ display: "flex", gap: 40, alignItems: "center", flexWrap: "wrap", flexDirection: "row-reverse" }}>
-              <div style={{ flex: "1 1 400px" }}>
-                <div style={{ fontSize: 80, fontWeight: 900, color: "var(--border-hover)", lineHeight: 1, marginBottom: 24 }}>02</div>
-                <h3 style={{ fontSize: 32, fontWeight: 700, marginBottom: 16 }}>Dynamic Assembly</h3>
+            <div className="flex flex-col lg:flex-row-reverse gap-10 items-center">
+              <div className="flex-1 w-full">
+                <div className="gradient-text" style={{ fontSize: 80, fontWeight: 900, lineHeight: 1, marginBottom: 24, opacity: 0.8 }}>02</div>
+                <h3 style={{ fontSize: 32, fontWeight: 700, marginBottom: 16 }}>Build missing tools</h3>
                 <p style={{ fontSize: 18, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                  If a tool doesn't exist, the platform automatically writes and validates the Model Context Protocol (MCP) server for the integration on-the-fly.
+                  From OpenAPI, a docs URL, or a description, the MCP factory probes live and registers tools.
                 </p>
               </div>
-              <div className="glass-card" style={{ flex: "1 1 400px", padding: 32, background: "rgba(0,0,0,0.4)" }}>
+              <div className="glass-panel flex-1 w-full p-8">
                 <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                  <div className="spinner" style={{ width: 24, height: 24, borderColor: "var(--accent-pink) transparent transparent transparent" }} />
-                  <span style={{ color: "var(--accent-pink)", fontFamily: "var(--font-mono)" }}>Building Stripe MCP...</span>
+                  <div className="spinner" style={{ width: 24, height: 24 }} />
+                  <span style={{ color: "var(--accent-pink)", fontFamily: "var(--font-mono)" }}>Building MCP…</span>
                 </div>
               </div>
             </div>
-
-            {/* Step 3 */}
-            <div style={{ display: "flex", gap: 40, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ flex: "1 1 400px" }}>
-                <div style={{ fontSize: 80, fontWeight: 900, color: "var(--border-hover)", lineHeight: 1, marginBottom: 24 }}>03</div>
-                <h3 style={{ fontSize: 32, fontWeight: 700, marginBottom: 16 }}>Execute & Monitor</h3>
+            <div className="flex flex-col lg:flex-row gap-10 items-center">
+              <div className="flex-1 w-full">
+                <div className="gradient-text" style={{ fontSize: 80, fontWeight: 900, lineHeight: 1, marginBottom: 24, opacity: 0.8 }}>03</div>
+                <h3 style={{ fontSize: 32, fontWeight: 700, marginBottom: 16 }}>Execute and watch</h3>
                 <p style={{ fontSize: 18, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                  The Orchestrator executes the workflow, handling retries, circuit breakers, and human-in-the-loop approvals automatically.
+                  The orchestrator runs the DAG with retries, circuit breakers, and approvals. You see it as a chat.
                 </p>
               </div>
-              <div className="glass-card" style={{ flex: "1 1 400px", padding: 32, background: "rgba(0,0,0,0.4)" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-primary)", paddingBottom: 8 }}>
-                    <span>Fetch Data</span> <span style={{ color: "var(--success)" }}>DONE</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-primary)", paddingBottom: 8 }}>
-                    <span>Generate PDF</span> <span style={{ color: "var(--success)" }}>DONE</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span>Email User</span> <span style={{ color: "var(--success)" }}>DONE</span>
-                  </div>
+              <div className="glass-panel flex-1 w-full p-8" style={{ fontFamily: "var(--font-mono)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-primary)", paddingBottom: 8, marginBottom: 8 }}>
+                  <span>Site health</span> <span style={{ color: "var(--success)" }}>DONE</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>Report</span> <span style={{ color: "var(--success)" }}>DONE</span>
                 </div>
               </div>
             </div>
@@ -294,27 +255,25 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section style={{ padding: "120px 20px", textAlign: "center", background: "var(--bg-secondary)", position: "relative" }}>
-        <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 800, height: 1, background: "linear-gradient(90deg, transparent, var(--accent), transparent)" }} />
+      <section className="py-20 md:py-32 px-5 text-center relative" style={{ background: "var(--bg-secondary)" }}>
         <div style={{ maxWidth: 800, margin: "0 auto" }}>
-          <h2 style={{ fontSize: "clamp(36px, 6vw, 64px)", fontWeight: 900, marginBottom: 32 }}>
-            Ready to build the future?
+          <h2 style={{ fontSize: "clamp(36px, 6vw, 64px)", fontWeight: 900, marginBottom: 32, letterSpacing: "-0.03em" }}>
+            Ready to try it?
           </h2>
-          <p style={{ fontSize: 24, color: "var(--text-secondary)", marginBottom: 48 }}>
-            Join thousands of developers automating their workflows with AgentOS.
+          <p style={{ fontSize: "clamp(18px, 4vw, 24px)", color: "var(--text-secondary)", marginBottom: 48 }}>
+            Open a free guest workspace. No credit card. Bring your own API key whenever you want.
           </p>
-          <Link href="/signup" className="btn btn-primary btn-lg" style={{ transform: "scale(1.1)" }}>
-            Get Started for Free
-          </Link>
+          <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
+            <Link href="/login" className="btn btn-primary btn-lg">Sign In</Link>
+            <Link href="/get-started" className="btn btn-secondary btn-lg">Get Started for Free</Link>
+          </div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer style={{ padding: "64px 40px", borderTop: "1px solid var(--border-primary)", background: "var(--bg-primary)" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 48 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+      <footer className="pt-16 pb-8 px-5" style={{ borderTop: "1px solid var(--border-primary)", background: "var(--bg-primary)" }}>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-10 md:gap-12" style={{ maxWidth: 1200, margin: "0 auto" }}>
+          <div className="col-span-2 lg:col-span-1 mb-2 lg:mb-0">
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
               <div style={{
                 width: 24, height: 24, borderRadius: "6px",
                 background: "linear-gradient(135deg, var(--accent), var(--accent-pink))",
@@ -323,35 +282,41 @@ export default function LandingPage() {
               }}>A</div>
               <span style={{ fontSize: 18, fontWeight: 800 }}>AgentOS</span>
             </div>
-            <p style={{ color: "var(--text-tertiary)", fontSize: 14 }}>
-              The open-source autonomous workflow engine for the AI era.
+            <p style={{ color: "var(--text-tertiary)", fontSize: 14, lineHeight: 1.6 }}>
+              The autonomous workspace that builds its own tools.
             </p>
           </div>
           <div>
-            <h4 style={{ fontWeight: 600, marginBottom: 16 }}>Product</h4>
+            <h2 style={{ fontWeight: 600, marginBottom: 16, fontSize: 15 }}>Product</h2>
             <ul style={{ listStyle: "none", padding: 0, display: "flex", flexDirection: "column", gap: 12, color: "var(--text-secondary)", fontSize: 14 }}>
-              <li><Link href="/features" style={{ color: "inherit", textDecoration: "none" }}>Features</Link></li>
-              <li><Link href="/integrations" style={{ color: "inherit", textDecoration: "none" }}>Integrations</Link></li>
-              <li><Link href="/pricing" style={{ color: "inherit", textDecoration: "none" }}>Pricing</Link></li>
+              <li><Link href="/features">Features</Link></li>
+              <li><Link href="/integrations">Integrations</Link></li>
+              <li><Link href="/pricing">Pricing</Link></li>
             </ul>
           </div>
           <div>
-            <h4 style={{ fontWeight: 600, marginBottom: 16 }}>Resources</h4>
+            <h2 style={{ fontWeight: 600, marginBottom: 16, fontSize: 15 }}>Resources</h2>
             <ul style={{ listStyle: "none", padding: 0, display: "flex", flexDirection: "column", gap: 12, color: "var(--text-secondary)", fontSize: 14 }}>
-              <li><Link href="/docs" style={{ color: "inherit", textDecoration: "none" }}>Documentation</Link></li>
-              <li><Link href="/blog" style={{ color: "inherit", textDecoration: "none" }}>Blog</Link></li>
-              <li><Link href="/community" style={{ color: "inherit", textDecoration: "none" }}>Community</Link></li>
+              <li><Link href="/docs">Documentation</Link></li>
+              <li><Link href="/faq">FAQs</Link></li>
+              <li><Link href="/blog">Blog</Link></li>
+              <li><Link href="/community">Community</Link></li>
             </ul>
           </div>
           <div>
-            <h4 style={{ fontWeight: 600, marginBottom: 16 }}>Legal</h4>
+            <h2 style={{ fontWeight: 600, marginBottom: 16, fontSize: 15 }}>Legal</h2>
             <ul style={{ listStyle: "none", padding: 0, display: "flex", flexDirection: "column", gap: 12, color: "var(--text-secondary)", fontSize: 14 }}>
-              <li><Link href="/privacy" style={{ color: "inherit", textDecoration: "none" }}>Privacy Policy</Link></li>
-              <li><Link href="/terms" style={{ color: "inherit", textDecoration: "none" }}>Terms of Service</Link></li>
+              <li><Link href="/privacy">Privacy Policy</Link></li>
+              <li><Link href="/terms">Terms of Service</Link></li>
+              <li><Link href="/contact">Contact</Link></li>
             </ul>
           </div>
         </div>
+        <div style={{ maxWidth: 1200, margin: "48px auto 0", paddingTop: 32, borderTop: "1px solid var(--border-primary)" }}>
+          <p style={{ fontSize: 13, color: "var(--text-tertiary)" }}>© 2026 AgentOS Inc. All rights reserved.</p>
+        </div>
       </footer>
+      </div>
     </div>
   );
 }

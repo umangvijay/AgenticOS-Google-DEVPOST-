@@ -36,21 +36,53 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function csrfHeaders(): Record<string, string> {
+  if (typeof document === "undefined") return {};
+  const match = document.cookie.split("; ").find((c) => c.startsWith("agentos_csrf="));
+  if (!match) return {};
+  return { "X-CSRF-Token": decodeURIComponent(match.split("=").slice(1).join("=")) };
+}
+
+async function ensureCsrf(): Promise<void> {
+  if (typeof document === "undefined") return;
+  if (document.cookie.includes("agentos_csrf=")) return;
+  await fetch(`${API_BASE.replace("/api/v1", "")}/api/v1/csrf-token`, { credentials: "include" });
+}
+
 // ── Generic fetcher with auth ────────────────────────────────────
+
+function formatApiError(errData: unknown, status: number): string {
+  const detail = (errData as { detail?: unknown } | null)?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item) return String((item as { msg: unknown }).msg);
+        return JSON.stringify(item);
+      })
+      .join("; ");
+  }
+  if (detail && typeof detail === "object") return JSON.stringify(detail);
+  return `API error: ${status}`;
+}
 
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  await ensureCsrf();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...authHeaders(),
+    ...csrfHeaders(),
     ...(options.headers as Record<string, string> || {}),
   };
 
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
+    credentials: "include",
   });
 
   if (res.status === 401) {
@@ -75,7 +107,7 @@ async function apiFetch<T>(
         const retry = await fetch(`${API_BASE}${path}`, { ...options, headers });
         if (!retry.ok) {
           const errData = await retry.json().catch(() => ({}));
-          throw new Error(errData.detail || `API error: ${retry.status}`);
+          throw new Error(formatApiError(errData, retry.status));
         }
         return retry.json();
       } else {
@@ -93,7 +125,7 @@ async function apiFetch<T>(
 
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.detail || `API error: ${res.status}`);
+    throw new Error(formatApiError(errData, res.status));
   }
 
   return res.json();
@@ -126,6 +158,8 @@ export interface WorkflowRun {
   status: string;
   tasks: Task[];
   created_at: string;
+  parent_run_id?: string | null;
+  thread_id?: string | null;
 }
 
 export interface WorkflowEvent {
@@ -203,13 +237,36 @@ export interface UserSettings {
   auto_approve_low_risk: boolean;
 }
 
+export interface GoalAttachment {
+  name: string;
+  mime: string;
+  text?: string;
+  image_base64?: string;
+}
+
 // ── Workflows ────────────────────────────────────────────────────
 
-export async function submitGoal(goal: string) {
-  return apiFetch<{ run_id: string; workflow_id: string; status: string; task_count: number }>(
+export async function submitGoal(
+  goal: string,
+  attachments: GoalAttachment[] = [],
+  opts: { parent_run_id?: string; thread_id?: string } = {},
+) {
+  return apiFetch<{ run_id: string; workflow_id: string; status: string; task_count: number; thread_id?: string }>(
     "/workflows",
-    { method: "POST", body: JSON.stringify({ goal }) }
+    {
+      method: "POST",
+      body: JSON.stringify({
+        goal,
+        attachments,
+        parent_run_id: opts.parent_run_id || undefined,
+        thread_id: opts.thread_id || undefined,
+      }),
+    }
   );
+}
+
+export async function getWorkflowThread(runId: string) {
+  return apiFetch<{ thread_id: string; workflows: WorkflowRun[] }>(`/workflows/${runId}/thread`);
 }
 
 export async function listWorkflows(limit = 50, offset = 0) {
@@ -236,6 +293,13 @@ export async function retryWorkflow(runId: string) {
   );
 }
 
+export async function resumeWorkflow(runId: string) {
+  return apiFetch<{ run_id: string; status: string; resumed_tasks: number }>(
+    `/workflows/${runId}/resume`,
+    { method: "POST" }
+  );
+}
+
 export function subscribeWorkflowEvents(
   runId: string,
   onMessage: (event: WorkflowEvent) => void,
@@ -243,6 +307,7 @@ export function subscribeWorkflowEvents(
   onError?: (err: unknown) => void
 ) {
   const controller = new AbortController();
+  const seen = new Set<string>();
 
   fetchEventSource(`${API_BASE}/workflows/${runId}/events`, {
     headers: authHeaders(),
@@ -257,7 +322,12 @@ export function subscribeWorkflowEvents(
     onmessage: (msg) => {
       if (msg.data) {
         try {
-          onMessage(JSON.parse(msg.data));
+          const data = JSON.parse(msg.data) as WorkflowEvent;
+          if (data.event_id) {
+            if (seen.has(data.event_id)) return;
+            seen.add(data.event_id);
+          }
+          onMessage(data);
         } catch (e) {
           console.error("Failed to parse SSE event", e);
         }
@@ -281,18 +351,45 @@ export async function getIntegration(mcpId: string) {
   return apiFetch<Integration & { tools: unknown[] }>(`/integrations/${mcpId}`);
 }
 
-export async function buildIntegrationFromURL(url: string, name?: string) {
-  return apiFetch<{ status: string; message: string }>(
+export async function buildIntegrationFromURL(url: string, name?: string, method?: "url" | "website") {
+  return apiFetch<{ status: string; message: string; build_id?: string; mcp_id?: string }>(
     "/integrations/build-from-url",
-    { method: "POST", body: JSON.stringify({ url, name }) }
+    { method: "POST", body: JSON.stringify({ url, name, method }) }
+  );
+}
+
+export async function buildIntegrationFromWebsite(url: string, name?: string, notes?: string) {
+  return apiFetch<{ status: string; message: string; build_id?: string; mcp_id?: string }>(
+    "/integrations/build-from-website",
+    { method: "POST", body: JSON.stringify({ url, name, notes }) }
+  );
+}
+
+export async function buildIntegrationFromSpec(spec: string, name?: string) {
+  return apiFetch<{ status: string; message: string; build_id?: string; mcp_id?: string }>(
+    "/integrations/build",
+    { method: "POST", body: JSON.stringify({ spec, name }) }
   );
 }
 
 export async function buildIntegrationFromPrompt(prompt: string, name?: string) {
-  return apiFetch<{ status: string; message: string }>(
+  return apiFetch<{ status: string; message: string; build_id?: string; mcp_id?: string }>(
     "/integrations/build-from-prompt",
     { method: "POST", body: JSON.stringify({ prompt, name }) }
   );
+}
+
+export async function getIntegrationBuild(buildId: string) {
+  return apiFetch<{
+    build_id: string;
+    status: string;
+    stage: string;
+    logs: string[];
+    mcp_id?: string;
+    tools?: unknown[];
+    error?: string;
+    message?: string;
+  }>(`/integrations/builds/${buildId}`);
 }
 
 export async function testIntegration(mcpId: string) {
@@ -393,7 +490,7 @@ export async function searchMemory(query: string, limit = 10) {
 // ── Approvals ────────────────────────────────────────────────────
 
 export async function listApprovals() {
-  return apiFetch<ApprovalRequest[]>("/approvals");
+  return apiFetch<{ approvals: ApprovalRequest[]; count: number }>("/approvals");
 }
 
 export async function resolveApproval(approvalId: string, action: "approve" | "reject") {
@@ -405,4 +502,146 @@ export async function resolveApproval(approvalId: string, action: "approve" | "r
 export async function healthCheck() {
   const res = await fetch(`${API_BASE.replace("/api/v1", "")}/health`);
   return res.json();
+}
+
+// ── Credentials ──────────────────────────────────────────────────
+
+export async function listCredentials() {
+  return apiFetch<{ credentials: string[]; count: number }>("/credentials");
+}
+
+export async function storeCredential(name: string, values: Record<string, string>) {
+  return apiFetch<{ name: string; fields: string[]; stored: boolean }>("/credentials", {
+    method: "POST",
+    body: JSON.stringify({ name, values }),
+  });
+}
+
+export async function deleteCredential(name: string) {
+  return apiFetch(`/credentials/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
+// ── Capabilities ─────────────────────────────────────────────────
+
+export async function checkSiteHealth(url: string) {
+  return apiFetch<Record<string, unknown>>("/capabilities/site-health", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+}
+
+export async function debugSource(source: string, language = "python", error_message = "", goal = "") {
+  return apiFetch<Record<string, unknown>>("/capabilities/debug", {
+    method: "POST",
+    body: JSON.stringify({ source, language, error_message, goal }),
+  });
+}
+
+export async function pingGemini() {
+  return apiFetch<{ ok: boolean; reply: string; using_user_key: boolean }>("/capabilities/ping", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function generateProject(brief: string, kind = "website", name = "", scale = "standard") {
+  return apiFetch<{
+    artifact_id: string;
+    name: string;
+    summary: string;
+    files: string[];
+    entrypoint: string;
+    kind: string;
+    scale?: string;
+  }>("/capabilities/generate", {
+    method: "POST",
+    body: JSON.stringify({ brief, kind, name, scale }),
+  });
+}
+
+export async function listArtifacts() {
+  return apiFetch<{ artifacts: unknown[]; count: number }>("/artifacts");
+}
+
+export function artifactFileUrl(artifactId: string, filePath: string) {
+  return `${API_BASE}/artifacts/${artifactId}/files/${filePath}`;
+}
+
+export async function fetchArtifactText(artifactId: string, filePath: string) {
+  const res = await fetch(`${API_BASE}/artifacts/${artifactId}/files/${encodeURIComponent(filePath).replace(/%2F/g, "/")}`, {
+    headers: { ...authHeaders() },
+    credentials: "include",
+  });
+  if (!res.ok) {
+    throw new Error("Could not load generated file");
+  }
+  return res.text();
+}
+
+// ── Resume ───────────────────────────────────────────────────────
+
+export async function createResumeFromText(profile_text: string, job_description = "", tailor = false) {
+  return apiFetch<Record<string, unknown>>("/resume/create", {
+    method: "POST",
+    body: JSON.stringify({ profile_text, job_description, tailor }),
+  });
+}
+
+export async function tailorResume(master_resume: Record<string, unknown>, job_description: string) {
+  return apiFetch<{ status: string; tailored_resume: Record<string, unknown> }>("/resume/tailor", {
+    method: "POST",
+    body: JSON.stringify({ master_resume, job_description, target_job_id: "jd" }),
+  });
+}
+
+export async function renderResumeHtml(resume: Record<string, unknown>) {
+  return apiFetch<{ html: string; pdf_error?: string }>("/resume/render", {
+    method: "POST",
+    body: JSON.stringify({ resume, format: "html" }),
+  });
+}
+
+export async function scanResumeFile(file: File, jobDescription: string) {
+  await ensureCsrf();
+  const form = new FormData();
+  form.append("file", file);
+  form.append("jobDescription", jobDescription);
+  const headers: Record<string, string> = { ...authHeaders(), ...csrfHeaders() };
+  delete (headers as { "Content-Type"?: string })["Content-Type"];
+  const res = await fetch(`${API_BASE}/resume/scan`, {
+    method: "POST",
+    headers,
+    body: form,
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error((errData as { detail?: string }).detail || `API error: ${res.status}`);
+  }
+  return res.json();
+}
+
+// ── Context usage ────────────────────────────────────────────────
+
+export interface ContextCategory {
+  id: string;
+  label: string;
+  tokens: number;
+}
+
+export interface ContextUsage {
+  window_tokens: number;
+  used_tokens: number;
+  remaining_tokens?: number;
+  percent: number;
+  daily_limit: number;
+  daily_used?: number;
+  daily_remaining?: number;
+  model: string;
+  tool_count: number;
+  categories: ContextCategory[];
+}
+
+export async function getContextUsage() {
+  return apiFetch<ContextUsage>("/usage/context");
 }

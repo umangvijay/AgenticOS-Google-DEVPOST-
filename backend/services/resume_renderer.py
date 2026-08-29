@@ -86,6 +86,9 @@ class ResumeRendererService:
             return ""
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+    def render_html(self, resume: Resume) -> str:
+        return self._generate_html(resume)
+
     def render_pdf(self, resume: Resume) -> bytes:
         """Renders a Resume object to a PDF byte string via WeasyPrint."""
         html_string = self._generate_html(resume)

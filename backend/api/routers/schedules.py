@@ -87,8 +87,9 @@ async def create_schedule(
         "name": name,
         "goal": goal,
         "cron_expression": body.cron_expression,
+        "schedule_type": "cron",
         "timezone": body.timezone,
-        "is_enabled": body.is_enabled,
+        "status": "ACTIVE" if body.is_enabled else "PAUSED",
         "next_run_at": next_run,
         "created_at": now,
         "updated_at": now,
@@ -162,6 +163,8 @@ async def update_schedule(
             if not croniter.is_valid(body.cron_expression):
                 raise ValueError()
             updates["cron_expression"] = body.cron_expression
+            cron = croniter(body.cron_expression, datetime.now(timezone.utc))
+            updates["next_run_at"] = cron.get_next(datetime).isoformat()
         except (ValueError, ImportError):
             raise HTTPException(status_code=400, detail="Invalid cron expression")
     if body.timezone is not None:
@@ -206,15 +209,20 @@ async def run_now(
     if schedule.get("user_id") != user.user_id and not user.is_admin():
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # Record execution
-    await factory.schedule_repo.record_execution(
-        schedule_id,
-        {"triggered_by": "manual", "triggered_at": datetime.now(timezone.utc).isoformat()},
-    )
+    # Publish a real trigger event — the worker creates and executes the run
+    from backend.models.schedule import SchedulerTriggerEvent
+    scheduled_time = datetime.now(timezone.utc)
+    event = SchedulerTriggerEvent(schedule_id=schedule_id, scheduled_time=scheduled_time)
+    await factory.message_bus.publish("agentos-scheduler-triggers", event.model_dump(mode="json"))
 
-    # TODO: Trigger workflow engine with schedule's goal
+    import hashlib
+    execution_key = f"{schedule_id}|{scheduled_time.isoformat()}"
+    run_id = "sch-" + hashlib.sha256(execution_key.encode("utf-8")).hexdigest()
+    await factory.schedule_repo.record_execution(schedule_id, run_id, "TRIGGERED")
+
     return {
         "schedule_id": schedule_id,
+        "run_id": run_id,
         "message": "Schedule execution triggered.",
         "goal": schedule.get("goal"),
     }
@@ -233,10 +241,11 @@ async def toggle_pause(
     if schedule.get("user_id") != user.user_id and not user.is_admin():
         raise HTTPException(status_code=403, detail="Access denied")
 
-    new_state = not schedule.get("is_enabled", True)
-    await factory.schedule_repo.update_schedule(schedule_id, {"is_enabled": new_state})
+    currently_active = str(schedule.get("status", "ACTIVE")).upper() == "ACTIVE"
+    new_status = "PAUSED" if currently_active else "ACTIVE"
+    await factory.schedule_repo.update_schedule(schedule_id, {"status": new_status})
 
-    return {"schedule_id": schedule_id, "is_enabled": new_state}
+    return {"schedule_id": schedule_id, "status": new_status, "is_enabled": new_status == "ACTIVE"}
 
 
 @router.get("/{schedule_id}/history")

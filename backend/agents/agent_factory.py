@@ -2,6 +2,7 @@ from typing import Optional, List, Dict, Any
 from google.adk.agents.llm_agent import LlmAgent
 from google.adk.models.google_llm import Gemini
 from backend.config.settings import settings
+from backend.services.llm_context import gemini_adk_kwargs
 from backend.models.plugin import PluginAgentDefinition
 from backend.services.runtime_snapshot import RuntimeSnapshotRegistry
 from backend.observability.tracing import get_tracer
@@ -32,19 +33,9 @@ class AgentFactory:
                 logger.warning(f"Agent {agent_id} not found in current snapshot v{snapshot.version}")
                 return None
                 
-            client_kwargs = {}
-            if not settings.GEMINI_API_KEY:
-                client_kwargs = {
-                    "vertexai": True,
-                    "project": settings.GOOGLE_CLOUD_PROJECT,
-                    "location": settings.GOOGLE_CLOUD_REGION
-                }
-            else:
-                client_kwargs = {"api_key": settings.GEMINI_API_KEY}
-                
             llm = Gemini(
                 model=settings.GEMINI_MODEL,
-                client_kwargs=client_kwargs
+                client_kwargs=gemini_adk_kwargs(),
             )
             
             # We need to build the tool functions that delegate to ToolRouter

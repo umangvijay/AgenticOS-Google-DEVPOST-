@@ -13,7 +13,8 @@ WORKDIR /app
 # Copy wheels from builder and install
 COPY --from=builder /app/wheels /wheels
 COPY --from=builder /app/requirements.txt .
-RUN pip install --no-cache /wheels/*
+RUN pip install --no-cache /wheels/* \
+    && python -m playwright install --with-deps chromium
 
 # Copy application source
 COPY . .

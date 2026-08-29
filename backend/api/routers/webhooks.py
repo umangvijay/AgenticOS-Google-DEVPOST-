@@ -1,67 +1,81 @@
-from fastapi import APIRouter, Request, HTTPException, Depends
-from typing import Dict, Any
-from backend.repositories.workflow_repository import WorkflowRepository
-from backend.repositories.message_bus import MessageBus
-from backend.models.schemas import WorkflowRun, Task, TaskStatus, WorkflowEventType
+"""
+AgentOS — Webhooks Router
+
+POST /api/v1/webhooks/{schedule_or_goal_id} — External trigger.
+If the id matches one of the caller's schedules, its goal is executed with the
+webhook payload injected as the root task's output ({{ tasks.webhook.output.* }}).
+"""
+
 import uuid
 import logging
 
+from fastapi import APIRouter, Request, HTTPException
+
+from backend.models.schemas import WorkflowRun, Task, TaskStatus
+from backend.engine.repo_adapter import persist_run
+
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
+router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
-# Simple dependency injection (in real app this would come from app state)
-def get_workflow_repo() -> WorkflowRepository:
-    from backend.api.main import app
-    return app.state.workflow_repo
 
-def get_message_bus() -> MessageBus:
-    from backend.api.main import app
-    return app.state.message_bus
-
-@router.post("/{workflow_id}")
-async def trigger_webhook(
-    workflow_id: str,
-    request: Request,
-    repo: WorkflowRepository = Depends(get_workflow_repo),
-    bus: MessageBus = Depends(get_message_bus)
-):
+@router.post("/{schedule_id}")
+async def trigger_webhook(schedule_id: str, request: Request):
     """
-    Webhook trigger for workflows.
-    Injects the webhook payload as the initial context of the workflow.
+    Webhook trigger: starts the goal attached to the given schedule,
+    with the webhook payload available to all tasks via interpolation.
     """
+    factory = getattr(request.app.state, "factory", None)
+    workflow_engine = getattr(request.app.state, "workflow_engine", None)
+    if not factory or not workflow_engine:
+        raise HTTPException(status_code=500, detail="Server not initialized")
+
+    schedule = await factory.schedule_repo.get_schedule(schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="No trigger registered with this id")
+    if str(schedule.get("status", "")).upper() != "ACTIVE":
+        raise HTTPException(status_code=409, detail="Trigger is paused")
+
     try:
         payload = await request.json()
     except Exception:
         payload = {}
-        
-    # In a real system, we'd fetch the WorkflowDefinition by ID
-    # For this demo, we'll construct a default WorkflowRun assuming the webhook starts it.
+
     run_id = str(uuid.uuid4())
-    
-    # We create a dummy initial task that "received" the webhook data,
-    # so downstream tasks can access it via {{ tasks.webhook.output.data }}
+    workflow_id = f"wh-{run_id[:8]}"
+
     webhook_task = Task(
         task_id="webhook",
         workflow_id=workflow_id,
         run_id=run_id,
+        user_id=schedule["user_id"],
         agent="core.set",
         status=TaskStatus.COMPLETED,
         input_data={"fields": payload},
-        output_data=payload
+        output_data=payload,
     )
-    
+    root_task = Task(
+        task_id=f"root-{run_id[:8]}",
+        workflow_id=workflow_id,
+        run_id=run_id,
+        user_id=schedule["user_id"],
+        agent="OrchestratorAgent",
+        input_data={"goal": schedule["goal"], "webhook_payload": payload},
+        status=TaskStatus.PENDING,
+        dependencies=["webhook"],
+    )
+
     run = WorkflowRun(
         run_id=run_id,
         workflow_id=workflow_id,
-        goal=f"Triggered via Webhook",
-        status=TaskStatus.COMPLETED,  # Dummy status since we don't have real tasks attached
-        tasks=[webhook_task]
+        user_id=schedule["user_id"],
+        goal=schedule["goal"],
+        status=TaskStatus.RUNNING,
+        tasks=[webhook_task, root_task],
     )
-    
-    repo.save_run(run)
-    logger.info(f"Webhook triggered workflow {workflow_id}, run_id: {run_id}")
-    
-    # Ideally, we would evaluate DAG here if we attached other tasks
-    
-    return {"message": "Webhook received", "run_id": run_id, "data": payload}
+    await persist_run(factory.workflow_repo, run)
+    logger.info(f"Webhook triggered schedule {schedule_id}, run {run_id}")
+
+    await workflow_engine.evaluate_dag(run_id)
+
+    return {"message": "Webhook received", "run_id": run_id, "workflow_id": workflow_id}

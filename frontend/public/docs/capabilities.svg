@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 280" width="720" height="280">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f6e6e8"/>
+      <stop offset="1" stop-color="#e8e0f4"/>
+    </linearGradient>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#a58fd8"/></marker>
+  </defs>
+  <rect width="720" height="280" rx="24" fill="url(#g)"/>
+  <circle cx="80" cy="48" r="48" fill="rgba(216,133,143,0.25)"/>
+  <circle cx="640" cy="230" r="70" fill="rgba(165,143,216,0.25)"/>
+  <text x="40" y="52" font-family="Georgia, serif" font-size="22" fill="#2b2a27">Studio tools</text>
+  
+  <rect x="40" y="110" width="140" height="72" rx="16" fill="rgba(255,255,255,0.7)" stroke="#d8858f" stroke-width="1.5"/>
+  <text x="110" y="152" text-anchor="middle" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#2b2a27">Health</text><path d="M184 146 H206" stroke="#a58fd8" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="210" y="110" width="140" height="72" rx="16" fill="rgba(255,255,255,0.7)" stroke="#d8858f" stroke-width="1.5"/>
+  <text x="280" y="152" text-anchor="middle" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#2b2a27">Debug</text><path d="M354 146 H376" stroke="#a58fd8" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="380" y="110" width="140" height="72" rx="16" fill="rgba(255,255,255,0.7)" stroke="#d8858f" stroke-width="1.5"/>
+  <text x="450" y="152" text-anchor="middle" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#2b2a27">Generate</text><path d="M524 146 H546" stroke="#a58fd8" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="550" y="110" width="140" height="72" rx="16" fill="rgba(255,255,255,0.7)" stroke="#d8858f" stroke-width="1.5"/>
+  <text x="620" y="152" text-anchor="middle" font-family="Inter, sans-serif" font-size="14" font-weight="600" fill="#2b2a27">Resume</text>
+</svg>

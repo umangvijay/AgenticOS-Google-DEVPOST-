@@ -85,7 +85,7 @@ class Task(BaseModel):
     max_retries: int = 3
     
     # Phase 11: Self-Healing
-    recovery_enabled: bool = False
+    recovery_enabled: bool = True
     max_recoveries: int = 3
     max_total_attempts: int = 5
     recovery_attempts: int = 0
@@ -104,6 +104,8 @@ class WorkflowRun(BaseModel):
     status: str = TaskStatus.PENDING
     tasks: List[Task] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    parent_run_id: Optional[str] = None
+    thread_id: Optional[str] = None
 
 class IntentSchema(GeminiCompatibleBaseModel):
     action: str = Field(description="The core action the user wants to perform")

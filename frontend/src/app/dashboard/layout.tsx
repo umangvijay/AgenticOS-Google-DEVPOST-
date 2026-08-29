@@ -4,24 +4,23 @@ import { useAuth } from "@/lib/auth-context";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect, ReactNode, useRef } from "react";
-import { getUnreadCount, listNotifications, markNotificationRead, markAllNotificationsRead, Notification } from "@/lib/api";
+import { getUnreadCount, listNotifications, markNotificationRead, markAllNotificationsRead, listWorkflows, Notification, WorkflowRun } from "@/lib/api";
+import ContextUsageButton from "@/components/ContextUsage";
 
 // ── Navigation Items ─────────────────────────────────────────────
+const NEW_CHAT = {
+  label: "New chat",
+  href: "/dashboard",
+  icon: (
+    <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  ),
+};
+
 const NAV_ITEMS = [
   {
-    label: "Dashboard",
-    href: "/dashboard",
-    icon: (
-      <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-        <rect x="3" y="3" width="7" height="7" rx="1.5" />
-        <rect x="14" y="3" width="7" height="7" rx="1.5" />
-        <rect x="3" y="14" width="7" height="7" rx="1.5" />
-        <rect x="14" y="14" width="7" height="7" rx="1.5" />
-      </svg>
-    ),
-  },
-  {
-    label: "Workflows",
+    label: "Runs",
     href: "/dashboard/workflows",
     icon: (
       <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
@@ -36,6 +35,25 @@ const NAV_ITEMS = [
       <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
         <path d="M12 2v6m0 8v6M2 12h6m8 0h6" />
         <circle cx="12" cy="12" r="3" />
+      </svg>
+    ),
+  },
+  {
+    label: "Studio",
+    href: "/dashboard/studio",
+    icon: (
+      <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+        <path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+      </svg>
+    ),
+  },
+  {
+    label: "Vault",
+    href: "/dashboard/credentials",
+    icon: (
+      <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+        <rect x="3" y="11" width="18" height="11" rx="2" />
+        <path d="M7 11V7a5 5 0 0110 0v4" />
       </svg>
     ),
   },
@@ -72,11 +90,18 @@ const NAV_ITEMS = [
 ];
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
+  return <DashboardInner>{children}</DashboardInner>;
+}
+
+function DashboardInner({ children }: { children: ReactNode }) {
   const { user, isAuthenticated, isLoading, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [recents, setRecents] = useState<WorkflowRun[]>([]);
   
   // Notification Panel State
   const [showNotifications, setShowNotifications] = useState(false);
@@ -90,7 +115,55 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     }
   }, [isLoading, isAuthenticated, router]);
 
-  // Poll unread notifications
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("agentos_sidebar_collapsed");
+      if (stored === "1") setCollapsed(true);
+      if (stored === "0") setCollapsed(false);
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("agentos_sidebar_collapsed", collapsed ? "1" : "0");
+    } catch { /* ignore */ }
+  }, [collapsed]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1023px)");
+    const apply = () => {
+      setIsMobile(mq.matches);
+      if (!mq.matches) setMobileOpen(false);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  function toggleSidebar() {
+    if (isMobile) setMobileOpen((v) => !v);
+    else setCollapsed((v) => !v);
+  }
+
+  const showLabels = isMobile ? mobileOpen : !collapsed;
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const load = async () => {
+      try {
+        const data = await listWorkflows(50);
+        setRecents((data.workflows || []).filter((wf) => !wf.parent_run_id));
+      } catch { /* ignore */ }
+    };
+    load();
+    const interval = setInterval(load, 8000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, pathname]);
+
   useEffect(() => {
     if (!isAuthenticated) return;
     const poll = async () => {
@@ -146,20 +219,41 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
   };
 
-  if (isLoading) {
+  if (isLoading || !isAuthenticated) {
     return (
-      <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div className="spinner" style={{ width: 32, height: 32 }} />
+      <div className="mesh-gradient" style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div className="glass-card" style={{ textAlign: "center", maxWidth: 420, padding: 32 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8 }}>Sign in to AgentOS</h1>
+          <p style={{ color: "var(--text-secondary)", marginBottom: 20 }}>
+            The dashboard is for an authenticated session. Sign in, or Get Started as a guest.
+          </p>
+          {isLoading && <div className="spinner" style={{ width: 28, height: 28, margin: "0 auto 16px" }} />}
+          <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+            <Link href="/login" className="btn btn-primary">Sign In</Link>
+            <Link href="/get-started" className="btn btn-secondary">Get Started</Link>
+          </div>
+        </div>
       </div>
     );
   }
 
-  if (!isAuthenticated) return null;
+  const isWorkspace = pathname === "/dashboard" || pathname.startsWith("/dashboard/workspace");
+  const pageTitle =
+    NAV_ITEMS.find((i) => pathname.startsWith(i.href))?.label
+    || (pathname.startsWith("/dashboard/workspace") ? "Chat" : "New chat");
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
+    <div className="mesh-gradient dashboard-shell">
       {/* ── Sidebar ────────────────────────────────────────────── */}
-      <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
+      {/* Mobile overlay backdrop */}
+      {mobileOpen && (
+        <div 
+          className="lg:hidden" 
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 900 }}
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+      <aside className={`sidebar ${!isMobile && collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}>
         {/* Logo */}
         <Link href="/" style={{ textDecoration: "none" }}>
           <div style={{
@@ -174,7 +268,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             }}>
               A
             </div>
-            {!collapsed && (
+            {showLabels && (
               <span style={{ fontSize: 18, fontWeight: 700 }} className="gradient-text">
                 AgentOS
               </span>
@@ -182,48 +276,104 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </div>
         </Link>
 
-        {/* Nav items */}
-        <nav style={{ flex: 1, padding: "12px 0", overflowY: "auto" }}>
+        <nav className="sidebar-scroll hide-scrollbar">
+          <Link
+            href={NEW_CHAT.href}
+            className={`sidebar-nav-item ${pathname === "/dashboard" ? "active" : ""}`}
+            title={!showLabels ? NEW_CHAT.label : undefined}
+            onClick={() => setMobileOpen(false)}
+          >
+            {NEW_CHAT.icon}
+            {showLabels && <span>{NEW_CHAT.label}</span>}
+          </Link>
+
+          {showLabels && (
+            <div className="sidebar-section-label">Recents</div>
+          )}
+          {showLabels && recents.slice(0, 14).map((wf) => (
+            <Link
+              key={wf.run_id}
+              href={`/dashboard/workspace/${wf.run_id}`}
+              className={`sidebar-recent ${pathname === `/dashboard/workspace/${wf.run_id}` || pathname === `/dashboard/workspace/${wf.thread_id || ""}` ? "active" : ""}`}
+              onClick={() => setMobileOpen(false)}
+              title={wf.goal}
+            >
+              <span className="truncate">{wf.goal}</span>
+            </Link>
+          ))}
+          {showLabels && recents.length === 0 && (
+            <div className="sidebar-empty">No chats yet</div>
+          )}
+
+          {showLabels && <div className="sidebar-section-label">Workspace</div>}
           {NAV_ITEMS.map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className={`sidebar-nav-item ${pathname === item.href ? "active" : ""}`}
-              title={collapsed ? item.label : undefined}
+              className={`sidebar-nav-item ${pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href)) ? "active" : ""}`}
+              title={!showLabels ? item.label : undefined}
+              onClick={() => setMobileOpen(false)}
             >
               {item.icon}
-              {!collapsed && <span>{item.label}</span>}
+              {showLabels && <span>{item.label}</span>}
             </Link>
           ))}
         </nav>
 
-        {/* Collapse button */}
-        <div style={{ padding: "12px 8px", borderTop: "1px solid var(--border-primary)" }}>
+        <div style={{ padding: "8px 8px 4px", borderTop: "1px solid var(--border-primary)" }}>
           <button
             className="sidebar-nav-item"
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={toggleSidebar}
             style={{ width: "100%" }}
+            title={showLabels ? "Collapse sidebar" : "Expand sidebar"}
           >
             <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"
-              style={{ transform: collapsed ? "rotate(180deg)" : undefined, transition: "transform 0.3s" }}>
+              style={{ transform: showLabels ? undefined : "rotate(180deg)", transition: "transform 0.3s" }}>
               <path d="M11 17l-5-5 5-5M17 17l-5-5 5-5" />
             </svg>
-            {!collapsed && <span>Collapse</span>}
+            {showLabels && <span>Collapse</span>}
           </button>
+          <div className="sidebar-user">
+            <div className="sidebar-avatar">{user?.name?.charAt(0)?.toUpperCase() || "U"}</div>
+            {showLabels && (
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="truncate" style={{ fontSize: 13, fontWeight: 600 }}>{user?.name || "User"}</div>
+                <div className="truncate" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{user?.email || ""}</div>
+              </div>
+            )}
+            <button className="btn btn-ghost btn-sm" style={{ padding: 6, flexShrink: 0 }} onClick={logout} title="Sign out">
+              <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+              </svg>
+            </button>
+          </div>
         </div>
       </aside>
 
       {/* ── Main content ───────────────────────────────────────── */}
-      <div className={`main-content ${collapsed ? "sidebar-collapsed" : ""}`} style={{ flex: 1 }}>
+      <div className={`main-content ${!isMobile && collapsed ? "sidebar-collapsed" : ""}`} style={{ flex: 1 }}>
         {/* Topbar */}
         <header className="topbar">
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <h1 style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}>
-              {NAV_ITEMS.find((i) => pathname.startsWith(i.href))?.label || "AgentOS"}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ padding: 4, flexShrink: 0 }}
+              onClick={toggleSidebar}
+              aria-label={showLabels ? "Collapse sidebar" : "Expand sidebar"}
+              title={showLabels ? "Collapse sidebar" : "Expand sidebar"}
+            >
+              <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <h1 className="truncate" style={{ fontSize: 16, fontWeight: 600, color: "var(--text-primary)" }}>
+              {pageTitle}
             </h1>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+            <ContextUsageButton />
             {/* Notification bell */}
             <div style={{ position: "relative" }} ref={panelRef}>
               <button
@@ -250,7 +400,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               {/* Notification Slide-Out Panel */}
               {showNotifications && (
                 <div className="glass-card animate-slide-in" style={{
-                  position: "absolute", top: "100%", right: 0, width: 360,
+                  position: "absolute", top: "100%", right: 0, width: "min(360px, calc(100vw - 24px))",
                   marginTop: 8, zIndex: 100, display: "flex", flexDirection: "column",
                   maxHeight: "80vh", overflow: "hidden", border: "1px solid var(--border-primary)"
                 }}>
@@ -329,30 +479,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               )}
             </div>
 
-            {/* User menu */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: "50%",
-                background: "var(--accent-subtle)", color: "var(--accent)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: 14, fontWeight: 600,
-              }}>
-                {user?.name?.charAt(0)?.toUpperCase() || "U"}
-              </div>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-secondary)" }}>
-                {user?.name || "User"}
-              </span>
-              <button className="btn btn-ghost btn-sm" onClick={logout} title="Sign out">
-                <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
-                  <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
-                </svg>
-              </button>
-            </div>
           </div>
         </header>
 
-        {/* Page content */}
-        <main style={{ padding: 24 }}>
+        <main className={`dashboard-main ${isWorkspace ? "is-workspace" : ""}`} style={isWorkspace ? undefined : { padding: "clamp(16px, 3vw, 28px)" }}>
           {children}
         </main>
       </div>

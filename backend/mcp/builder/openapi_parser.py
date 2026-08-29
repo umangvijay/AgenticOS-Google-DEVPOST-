@@ -21,15 +21,25 @@ class OpenAPIParser:
         path = Path(file_path)
         if not path.exists():
             raise OpenAPIParserError(f"File not found: {file_path}")
-        
         with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
-            
-        if path.suffix in [".yaml", ".yml"]:
-            self.raw_spec = yaml.safe_load(content)
-        else:
-            self.raw_spec = json.loads(content)
-            
+            return self.parse_text(f.read(), hint=path.suffix)
+
+    def parse_text(self, content: str, hint: str = "") -> NormalizedAPIModel:
+        content = (content or "").strip()
+        if not content:
+            raise OpenAPIParserError("Empty OpenAPI specification")
+        try:
+            if hint in [".yaml", ".yml"] or (not content.startswith("{") and not content.startswith("[")):
+                self.raw_spec = yaml.safe_load(content)
+            else:
+                self.raw_spec = json.loads(content)
+        except Exception:
+            try:
+                self.raw_spec = yaml.safe_load(content)
+            except Exception as e:
+                raise OpenAPIParserError(f"Could not parse OpenAPI spec: {e}") from e
+        if not isinstance(self.raw_spec, dict):
+            raise OpenAPIParserError("OpenAPI spec must be an object")
         return self._normalize(self.raw_spec)
         
     def _validate_ssrf(self, url: str):
@@ -56,8 +66,10 @@ class OpenAPIParser:
         if not hostname:
             return
             
-        if hostname.lower() in ["localhost", "127.0.0.1", "::1"]:
+        if hostname.lower() in ["localhost", "127.0.0.1", "::1", "metadata.google.internal"]:
             raise SSRFViolationError("Localhost is prohibited")
+        if hostname.startswith("169.254.") or hostname == "169.254.169.254":
+            raise SSRFViolationError("Link-local / metadata addresses are prohibited")
             
         try:
             # Try to resolve to IP and check if private
@@ -99,56 +111,88 @@ class OpenAPIParser:
         # 1. Resolve entire spec to flatten it
         spec = self._deep_resolve(spec)
         
-        info = spec.get("info", {})
-        servers_data = spec.get("servers", [])
+        info = spec.get("info") if isinstance(spec.get("info"), dict) else {}
+        servers_data = spec.get("servers") or []
+        if not isinstance(servers_data, list):
+            servers_data = []
         
         servers = []
         for s in servers_data:
-            self._validate_ssrf(s.get("url", ""))
-            servers.append(ServerModel(url=s.get("url", ""), description=s.get("description")))
+            if not isinstance(s, dict) or not s.get("url"):
+                continue
+            try:
+                self._validate_ssrf(s.get("url", ""))
+                servers.append(ServerModel(url=s.get("url", ""), description=s.get("description")))
+            except Exception:
+                continue
             
-        security_schemes = spec.get("components", {}).get("securitySchemes", {})
-        global_security = spec.get("security", [])
+        components = spec.get("components") if isinstance(spec.get("components"), dict) else {}
+        security_schemes = components.get("securitySchemes") if isinstance(components.get("securitySchemes"), dict) else {}
+        global_security = spec.get("security") if isinstance(spec.get("security"), list) else []
         
         operations = []
-        paths = spec.get("paths", {})
+        paths = spec.get("paths") or {}
+        if not isinstance(paths, dict):
+            paths = {}
         for path, methods in paths.items():
+            if not isinstance(methods, dict):
+                continue
+            shared_params = methods.get("parameters") or []
+            if not isinstance(shared_params, list):
+                shared_params = []
             for method, op_data in methods.items():
                 if method.lower() not in ["get", "post", "put", "patch", "delete"]:
                     continue
-                    
+                if not isinstance(op_data, dict):
+                    continue
+
                 parameters = []
-                for p in op_data.get("parameters", []):
-                    parameters.append(ParameterModel(**p))
-                    
+                raw_params = list(shared_params) + list(op_data.get("parameters") or [])
+                for p in raw_params:
+                    if not isinstance(p, dict) or not p.get("name"):
+                        continue
+                    try:
+                        parameters.append(ParameterModel(**p))
+                    except Exception:
+                        continue
+
                 req_body = None
                 rb_data = op_data.get("requestBody")
-                if rb_data:
-                    req_body = RequestBodyModel(
-                        description=rb_data.get("description"),
-                        required=rb_data.get("required", False),
-                        content=rb_data.get("content", {})
-                    )
-                
-                # Operation specific security or fallback to global
-                security = op_data.get("security", global_security)
-                
+                if isinstance(rb_data, dict):
+                    try:
+                        req_body = RequestBodyModel(
+                            description=rb_data.get("description"),
+                            required=bool(rb_data.get("required", False)),
+                            content=rb_data.get("content") or {},
+                        )
+                    except Exception:
+                        req_body = None
+
+                security = op_data.get("security", global_security) or []
+                if not isinstance(security, list):
+                    security = []
+
+                op_servers = []
+                for s in op_data.get("servers") or []:
+                    if not isinstance(s, dict) or not s.get("url"):
+                        continue
+                    try:
+                        self._validate_ssrf(s.get("url", ""))
+                        op_servers.append(ServerModel(**s))
+                    except Exception:
+                        continue
+
                 op = NormalizedOperation(
-                    operation_id=op_data.get("operationId", f"{method}_{path.replace('/', '_').strip('_')}"),
+                    operation_id=str(op_data.get("operationId") or f"{method}_{str(path).replace('/', '_').strip('_')}"),
                     http_method=method.upper(),
-                    path=path,
-                    summary=op_data.get("summary"),
-                    description=op_data.get("description"),
+                    path=str(path),
+                    summary=op_data.get("summary") if isinstance(op_data.get("summary"), str) else None,
+                    description=op_data.get("description") if isinstance(op_data.get("description"), str) else None,
                     parameters=parameters,
                     request_body=req_body,
                     security_requirements=security,
-                    servers=[ServerModel(**s) for s in op_data.get("servers", [])]
+                    servers=op_servers,
                 )
-                
-                # Validate operation-level servers if any
-                for s in op.servers:
-                    self._validate_ssrf(s.url)
-                    
                 operations.append(op)
                 
         return NormalizedAPIModel(

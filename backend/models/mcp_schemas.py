@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from enum import Enum
@@ -13,6 +13,24 @@ class AuthType(str, Enum):
 class AuthMetadata(BaseModel):
     type: AuthType = AuthType.NONE
     credential_ref: Optional[str] = Field(None, description="Reference to Secret Manager or Config")
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _coerce_auth_type(cls, value):
+        if value is None or value == "":
+            return AuthType.NONE
+        raw = str(value).upper().replace(" ", "_")
+        aliases = {
+            "OAUTH": AuthType.OAUTH2,
+            "OAUTH2": AuthType.OAUTH2,
+            "BASIC": AuthType.API_KEY,
+            "BEARER": AuthType.API_KEY,
+            "APIKEY": AuthType.API_KEY,
+            "API_KEY": AuthType.API_KEY,
+            "NONE": AuthType.NONE,
+            "SERVICE_ACCOUNT": AuthType.SERVICE_ACCOUNT,
+        }
+        return aliases.get(raw, value)
 
 class ConnectorState(str, Enum):
     DRAFT = "DRAFT"
@@ -31,6 +49,7 @@ class MCPHealthStatus(str, Enum):
 class MCPTransportType(str, Enum):
     STREAMABLE_HTTP = "streamable_http"
     STDIO = "stdio"
+    INTERNAL = "internal"
 
 class MCPManifest(BaseModel):
     mcp_id: str
@@ -38,17 +57,19 @@ class MCPManifest(BaseModel):
     version: str
     endpoint: str
     transport: MCPTransportType
-    auth: AuthMetadata
+    auth: AuthMetadata = Field(default_factory=AuthMetadata)
     scopes: List[str] = Field(default_factory=list)
     health: MCPHealthStatus = MCPHealthStatus.UNKNOWN
     health_updated_at: Optional[datetime] = None
-    # Phase 4 Metadata
     state: ConnectorState = ConnectorState.DRAFT
     spec_hash: Optional[str] = None
     spec_version: Optional[str] = None
     source_uri: Optional[str] = None
     built_at: Optional[datetime] = None
-
+    description: str = ""
+    trust_tier: str = "pending_review"
+    source_type: str = "openapi"
+    spec_json: Optional[str] = None
     owner: str = "system"
     is_enabled: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -68,8 +89,8 @@ class CachedToolDefinition(BaseModel):
     expires_at: datetime
     # Phase 4: Operation-level auth binding
     auth_requirements: List[OperationAuthRequirement] = Field(default_factory=list)
-    # Phase 10: Authoritative risk level from the Registry
     risk_level: RiskLevel = RiskLevel.CRITICAL
+    operation: Optional[Dict[str, Any]] = None
 
 class ToolPolicyResult(BaseModel):
     allowed: bool

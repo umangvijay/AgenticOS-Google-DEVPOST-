@@ -1,19 +1,22 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Any, Optional
 
 class ParameterModel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
     name: str
-    in_: str = Field(alias="in")  # query, header, path, cookie
+    in_: str = Field(alias="in", default="query")
     description: Optional[str] = None
     required: bool = False
-    schema_: Dict[str, Any] = Field(default_factory=dict, alias="schema")
+    schema_: Dict[str, Any] = Field(default_factory=lambda: {"type": "string"}, alias="schema")
 
 class RequestBodyModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     description: Optional[str] = None
     required: bool = False
     content: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 class ServerModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     url: str
     description: Optional[str] = None
 

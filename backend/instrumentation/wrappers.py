@@ -22,8 +22,11 @@ class InstrumentedToolRouter:
     def __init__(self, inner: ToolRouter):
         self._inner = inner
 
-    async def get_tool_catalog(self) -> List[Dict[str, Any]]:
-        return await self._inner.get_tool_catalog()
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    async def get_tool_catalog(self, user_id: str = None) -> List[Dict[str, Any]]:
+        return await self._inner.get_tool_catalog(user_id)
 
     async def execute_tool(self, agent_tool_name: str, arguments: Dict[str, Any], context: Dict[str, Any] = None) -> Any:
         # Create a span for the tool execution
@@ -87,6 +90,9 @@ class InstrumentedWorkflowEngine:
     def __init__(self, inner):
         self._inner = inner
 
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
     async def evaluate_dag(self, run_id: str) -> None:
         with tracer.start_as_current_span(
             name="workflow.run",
@@ -98,7 +104,8 @@ class InstrumentedWorkflowEngine:
                 await self._inner.evaluate_dag(run_id)
                 
                 # Check the run status to see if it completed or failed in this eval
-                run = self._inner.repo.get_run(run_id)
+                from backend.engine.repo_adapter import load_run
+                run = await load_run(self._inner.repo, run_id)
                 if run:
                     from backend.models.schemas import TaskStatus
                     if run.status == TaskStatus.COMPLETED:

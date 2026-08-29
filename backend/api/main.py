@@ -68,8 +68,15 @@ from backend.api.routers.settings_router import router as settings_router
 from backend.api.routers.schedules import router as schedules_router
 from backend.api.routers.memory import router as memory_router
 from backend.api.routers.resume import router as resume_router
+from backend.api.routers.webhooks import router as webhooks_router
+from backend.api.routers.credentials import router as credentials_router
+from backend.api.routers.artifacts import router as artifacts_router
+from backend.api.routers.capabilities import router as capabilities_router
+from backend.api.routers.usage import router as usage_router
+from backend.api.routers.contact import router as contact_router  # public contact inbox + email delivery
 
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(contact_router, prefix="/api/v1")
 app.include_router(workflows_router, prefix="/api/v1")
 app.include_router(integrations_router, prefix="/api/v1")
 app.include_router(notifications_router, prefix="/api/v1")
@@ -78,6 +85,11 @@ app.include_router(schedules_router, prefix="/api/v1")
 app.include_router(memory_router, prefix="/api/v1")
 app.include_router(resume_router, prefix="/api/v1")
 app.include_router(approvals.router, prefix="/api/v1")
+app.include_router(webhooks_router, prefix="/api/v1")
+app.include_router(credentials_router, prefix="/api/v1")
+app.include_router(artifacts_router, prefix="/api/v1")
+app.include_router(capabilities_router, prefix="/api/v1")
+app.include_router(usage_router, prefix="/api/v1")
 
 
 
@@ -89,8 +101,16 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    origins = " ".join(settings.CORS_ALLOWED_ORIGINS) if settings.CORS_ALLOWED_ORIGINS else "'self'"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        f"connect-src 'self' {origins} http://127.0.0.1:8000 http://localhost:8000"
+    )
     if settings.APP_ENV != "development":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     return response
@@ -142,7 +162,10 @@ async def startup_event():
     
     approvals_engine = ApprovalsEngine()
     tool_policy = ToolPolicy()
-    tool_router = ToolRouter(factory.mcp_repo, tool_policy, approvals_engine, factory.idempotency_repo)
+    tool_router = ToolRouter(
+        factory.mcp_repo, tool_policy, approvals_engine,
+        factory.idempotency_repo, secrets_repo=factory.secrets_repo,
+    )
     
     app.state.tool_router = tool_router
 
@@ -157,13 +180,13 @@ async def startup_event():
     from backend.engine.engine import WorkflowEngine
     from backend.instrumentation.wrappers import InstrumentedWorkflowEngine
     workflow_engine = InstrumentedWorkflowEngine(
-        WorkflowEngine(factory.workflow_repo, factory.message_bus, agent_factory, factory.memory_repo)
+        WorkflowEngine(factory.workflow_repo, factory.message_bus, agent_factory, factory.memory_repo, factory.settings_repo)
     )
     app.state.workflow_engine = workflow_engine
 
     # 7. Start background worker
     from backend.worker import start_worker
-    asyncio.create_task(start_worker(factory.message_bus, workflow_engine))
+    asyncio.create_task(start_worker(factory.message_bus, workflow_engine, factory.schedule_repo))
 
     logger.info("All systems initialized. Ready to serve requests.")
 
@@ -198,13 +221,11 @@ async def health_check():
 async def get_csrf_token(request: Request):
     """Get a CSRF token. Frontend calls this on page load."""
     from fastapi.responses import JSONResponse
-    token = None
-    response = JSONResponse({"csrf_token": "set_in_cookie"})
-    token = set_csrf_cookie(response)
-    return JSONResponse(
-        {"csrf_token": token},
-        headers=dict(response.headers),
-    )
+    from backend.security.csrf import generate_csrf_token
+    token = generate_csrf_token()
+    response = JSONResponse({"csrf_token": token})
+    set_csrf_cookie(response, token)
+    return response
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -252,7 +273,7 @@ async def process_goal(
         )
         from backend.agents.intent.intent_agent import get_intent_agent
         from backend.agents.planner.planner_agent import get_planner_agent
-        from backend.engine.dag_validator import validate_dag, DAGValidationError
+        from backend.engine.dag_validator import validate_dag, enrich_plan_from_intent, DAGValidationError
         from google.adk.runners import InMemoryRunner
         from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
@@ -294,8 +315,10 @@ async def process_goal(
 
         logger.info(f"[{run_id[:8]}] Intent: {intent_result}")
 
-        # 2. Plan — real-time workflow planning by AI
-        planner_agent = get_planner_agent()
+        # 2. Plan — real-time workflow planning by AI, fed the user's live tool catalog
+        tool_router = getattr(request.app.state, "tool_router", None)
+        live_catalog = await tool_router.get_tool_catalog(user.user_id) if tool_router else []
+        planner_agent = get_planner_agent(catalog_json=json.dumps(live_catalog))
         planner_runner = InMemoryRunner(agent=planner_agent, app_name=settings.APP_NAME)
         plan_events = await run_with_retries(planner_runner, json.dumps(intent_result))
         raw_plan = extract_event_text(plan_events)
@@ -307,6 +330,7 @@ async def process_goal(
         else:
             raise Exception(f"Planner returned unexpected output type: {type(raw_plan)}")
 
+        workflow_def = enrich_plan_from_intent(workflow_def, intent_result, live_catalog, goal=goal)
         logger.info(f"[{run_id[:8]}] DAG: {len(workflow_def.tasks)} tasks")
 
         # 3. Validate DAG
@@ -330,8 +354,9 @@ async def process_goal(
                 tool=t_def.tool,
                 input_data=t_def.input_data,
                 dependencies=t_def.dependencies,
-                timeout_seconds=t_def.timeout_seconds,
+                timeout_seconds=max(t_def.timeout_seconds, 180) if t_def.agent in ("Orchestrator", "core.mcp_build") else t_def.timeout_seconds,
                 max_retries=t_def.max_retries,
+                recovery_enabled=True,
                 status=TaskStatus.PENDING,
             )
             run.tasks.append(task)
@@ -379,7 +404,10 @@ async def process_goal(
     except Exception as e:
         traceback.print_exc()
         logger.error(f"Execution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        msg = str(e)
+        if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
+            raise HTTPException(status_code=429, detail="The Gemini quota is exhausted. Retry after the quota resets.")
+        raise HTTPException(status_code=500, detail=msg)
 
 
 # ══════════════════════════════════════════════════════════════════

@@ -102,7 +102,15 @@ class IdempotencyGuard:
                 return IdempotencyResult(executed=True, result=result)
 
             except Exception as e:
-                # Commit failure — frees the lock for retry
+                # Challenge pause must not be recorded as a failed execution lock.
+                from backend.services.auth_challenges import ChallengePause
+                from backend.services.approvals_engine import ApprovalRequiredException
+                if isinstance(e, (ChallengePause, ApprovalRequiredException)):
+                    try:
+                        await self.repo.commit_failure(key)
+                    except Exception:
+                        pass
+                    raise
                 await self.repo.commit_failure(key)
                 logger.error(
                     f"[IDEMPOTENCY] Execution failed, lock released: {tool_name} "

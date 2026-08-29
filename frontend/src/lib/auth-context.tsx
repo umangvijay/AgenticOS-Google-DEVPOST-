@@ -2,13 +2,11 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 
-// ── Types ────────────────────────────────────────────────────────
-
 export interface User {
   id: string;
   email: string;
-  name: string;
   auth_provider: string;
+  name: string;
   avatar_url?: string;
   role: string;
   is_active: boolean;
@@ -27,15 +25,13 @@ interface AuthContextType extends AuthState {
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, name: string) => Promise<void>;
   loginWithGoogle: (idToken?: string, code?: string) => Promise<void>;
-  loginAsGuest: () => Promise<void>;
+  loginAsGuest: (signal?: AbortSignal) => Promise<void>;
   logout: () => Promise<void>;
   refreshAccessToken: () => Promise<string | null>;
   updateProfile: (data: { name?: string; avatar_url?: string }) => Promise<void>;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-
-// ── Context ──────────────────────────────────────────────────────
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -47,7 +43,45 @@ export function useAuth(): AuthContextType {
   return ctx;
 }
 
-// ── Provider ─────────────────────────────────────────────────────
+function parseApiError(data: unknown, fallback: string): string {
+  if (!data || typeof data !== "object") return fallback;
+  const detail = (data as { detail?: unknown }).detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail.map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object" && "msg" in item) return String((item as { msg: unknown }).msg);
+      return "";
+    }).filter(Boolean);
+    return parts.join(". ") || fallback;
+  }
+  return fallback;
+}
+
+async function fetchJson(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const parent = init.signal;
+  if (parent) {
+    if (parent.aborted) controller.abort();
+    else parent.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(parseApiError(data, `Request failed (${res.status})`));
+    }
+    return data;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("The request timed out. Check that the API is running, then try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
@@ -58,7 +92,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticated: false,
   });
 
-  // Load tokens from localStorage on mount
   useEffect(() => {
     const stored = localStorage.getItem("agentos_auth");
     if (stored) {
@@ -73,14 +106,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       } catch {
         localStorage.removeItem("agentos_auth");
-        setState(s => ({ ...s, isLoading: false }));
+        setState((s) => ({ ...s, isLoading: false }));
       }
     } else {
-      setState(s => ({ ...s, isLoading: false }));
+      setState((s) => ({ ...s, isLoading: false }));
     }
   }, []);
 
-  // Persist auth state
   const persistAuth = useCallback((user: User, accessToken: string, refreshToken: string) => {
     const data = { user, accessToken, refreshToken };
     localStorage.setItem("agentos_auth", JSON.stringify(data));
@@ -104,33 +136,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // ── API Methods ────────────────────────────────────────────────
-
   const login = useCallback(async (email: string, password: string) => {
-    const res = await fetch(`${API_BASE}/auth/login`, {
+    const data = await fetchJson(`${API_BASE}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.detail || "Login failed");
-    }
-    const data = await res.json();
+    }, 12000);
     persistAuth(data.user, data.access_token, data.refresh_token);
   }, [persistAuth]);
 
   const signup = useCallback(async (email: string, password: string, name: string) => {
-    const res = await fetch(`${API_BASE}/auth/signup`, {
+    const data = await fetchJson(`${API_BASE}/auth/signup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ email, password, name }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.detail || "Signup failed");
-    }
-    const data = await res.json();
+    }, 15000);
     persistAuth(data.user, data.access_token, data.refresh_token);
   }, [persistAuth]);
 
@@ -139,39 +161,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (idToken) body.id_token = idToken;
     if (code) body.code = code;
 
-    const res = await fetch(`${API_BASE}/auth/google`, {
+    const data = await fetchJson(`${API_BASE}/auth/google`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.detail || "Google login failed");
-    }
-    const data = await res.json();
+    }, 15000);
     persistAuth(data.user, data.access_token, data.refresh_token);
   }, [persistAuth]);
 
-  const loginAsGuest = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/auth/guest`, {
+  const loginAsGuest = useCallback(async (signal?: AbortSignal) => {
+    const data = await fetchJson(`${API_BASE}/auth/guest`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.detail || "Guest login failed");
-    }
-    const data = await res.json();
+      credentials: "include",
+      signal,
+    }, 8000);
     persistAuth(data.user, data.access_token, data.refresh_token);
   }, [persistAuth]);
 
   const logout = useCallback(async () => {
     if (state.accessToken) {
       try {
-        await fetch(`${API_BASE}/auth/logout`, {
+        await fetchJson(`${API_BASE}/auth/logout`, {
           method: "POST",
           headers: { Authorization: `Bearer ${state.accessToken}` },
-        });
+          credentials: "include",
+        }, 5000);
       } catch {
         // Logout locally even if server fails
       }
@@ -183,18 +199,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!state.refreshToken) return null;
 
     try {
-      const res = await fetch(`${API_BASE}/auth/refresh`, {
+      const data = await fetchJson(`${API_BASE}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ refresh_token: state.refreshToken }),
-      });
-
-      if (!res.ok) {
-        clearAuth();
-        return null;
-      }
-
-      const data = await res.json();
+      }, 8000);
       persistAuth(data.user, data.access_token, data.refresh_token);
       return data.access_token;
     } catch {
@@ -204,17 +214,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [state.refreshToken, persistAuth, clearAuth]);
 
   const updateProfile = useCallback(async (updates: { name?: string; avatar_url?: string }) => {
-    const res = await fetch(`${API_BASE}/auth/me`, {
+    const user = await fetchJson(`${API_BASE}/auth/me`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${state.accessToken}`,
       },
+      credentials: "include",
       body: JSON.stringify(updates),
-    });
-    if (!res.ok) throw new Error("Profile update failed");
-    const user = await res.json();
-    setState(s => ({
+    }, 8000);
+    setState((s) => ({
       ...s,
       user: { ...s.user!, ...user },
     }));

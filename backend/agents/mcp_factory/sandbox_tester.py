@@ -71,12 +71,15 @@ except Exception as e:
         try:
             # We use the current python executable so mcp package is available
             import sys
+            import os as _os
+            env = _os.environ.copy()
+            env["PYTHONPATH"] = str(test_dir)
             proc = await asyncio.create_subprocess_exec(
                 sys.executable, str(harness_file),
                 cwd=str(test_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env={"PYTHONPATH": str(test_dir)}
+                env=env
             )
             
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)

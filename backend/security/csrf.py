@@ -14,6 +14,8 @@ from typing import Optional
 
 from fastapi import Request, HTTPException, status, Response
 
+from backend.config.settings import settings
+
 logger = logging.getLogger(__name__)
 
 CSRF_COOKIE_NAME = "agentos_csrf"
@@ -25,8 +27,12 @@ UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 # Paths exempt from CSRF (API-key or OAuth callback)
 EXEMPT_PATHS = {
-    "/api/v1/auth/google",      # OAuth callback (verified by state param)
-    "/api/v1/auth/refresh",     # Uses refresh token in body
+    "/api/v1/auth/google",
+    "/api/v1/auth/refresh",
+    "/api/v1/auth/login",
+    "/api/v1/auth/signup",
+    "/api/v1/auth/guest",
+    "/api/v1/contact",
     "/health",
 }
 
@@ -47,7 +53,7 @@ def set_csrf_cookie(response: Response, token: Optional[str] = None) -> str:
         value=token,
         httponly=False,      # Must be readable by JS to send in header
         samesite="lax",
-        secure=False,        # Set to True in production with HTTPS
+        secure=settings.APP_ENV != "development",
         max_age=3600 * 24,   # 24 hours
         path="/",
     )

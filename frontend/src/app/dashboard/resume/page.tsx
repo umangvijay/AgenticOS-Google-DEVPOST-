@@ -1,11 +1,46 @@
 "use client";
 
 import { useState } from "react";
+import { scanResumeFile, createResumeFromText, renderResumeHtml } from "@/lib/api";
+
+function ResumeFromText({ jobDescription, onText }: { jobDescription: string; onText?: (text: string) => void }) {
+  const [profile, setProfile] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState<string>("");
+
+  async function run() {
+    if (!profile.trim()) return;
+    setBusy(true);
+    try {
+      const data = await createResumeFromText(profile, jobDescription, Boolean(jobDescription.trim()));
+      onText?.(profile);
+      setOut(JSON.stringify(data, null, 2));
+    } catch (e) {
+      setOut(e instanceof Error ? e.message : "Create failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--border-primary)" }}>
+      <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Or create from notes</h3>
+      <textarea className="input" rows={5} placeholder="Paste your background, roles, skills…" value={profile} onChange={(e) => setProfile(e.target.value)} />
+      <button type="button" className="btn btn-secondary" style={{ marginTop: 8, width: "100%" }} disabled={busy || !profile.trim()} onClick={run}>
+        {busy ? "Writing…" : "Create ATS resume"}
+      </button>
+      {out && <pre style={{ marginTop: 12, fontSize: 11, maxHeight: 200, overflow: "auto", fontFamily: "var(--font-mono)" }}>{out}</pre>}
+    </div>
+  );
+}
 
 export default function ResumePage() {
   const [file, setFile] = useState<File | null>(null);
   const [jobDescription, setJobDescription] = useState("");
   const [loading, setLoading] = useState(false);
+  const [extractedText, setExtractedText] = useState("");
+  const [htmlPreview, setHtmlPreview] = useState("");
+  const [tailoring, setTailoring] = useState(false);
   const [results, setResults] = useState<{
     score: number;
     keywords_found: string[];
@@ -25,32 +60,61 @@ export default function ResumePage() {
 
     setLoading(true);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("jobDescription", jobDescription);
-
-      const token = localStorage.getItem("agentos_auth");
-      const res = await fetch("http://localhost:8000/api/v1/resume/scan", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`
-        },
-        body: formData,
+      const data = await scanResumeFile(file, jobDescription) as Record<string, unknown> & {
+        score?: number;
+        keywords_found?: string[];
+        keywords_missing?: string[];
+        suggestions?: string[];
+        ats?: { overall_score?: number; matched_keywords?: string[]; missing_required_skills?: string[] };
+        extracted_text?: string;
+      };
+      if (typeof data.extracted_text === "string") setExtractedText(data.extracted_text);
+      setResults({
+        score: Number(data.score ?? data.ats?.overall_score ?? 0),
+        keywords_found: data.keywords_found || data.ats?.matched_keywords || [],
+        keywords_missing: data.keywords_missing || data.ats?.missing_required_skills || [],
+        suggestions: data.suggestions || [],
       });
-
-      if (!res.ok) {
-        throw new Error(`Server returned ${res.status}`);
-      }
-
-      const data = await res.json();
-      setResults(data);
     } catch (err) {
       console.error(err);
-      alert("Failed to analyze resume. Please try again.");
+      alert(err instanceof Error ? err.message : "Failed to analyze resume. Please try again.");
     } finally {
       setLoading(false);
     }
   };
+
+  async function handleTailor() {
+    const source = extractedText.trim();
+    if (!source || !jobDescription.trim()) {
+      alert("Scan or paste a resume first, then add a job description.");
+      return;
+    }
+    setTailoring(true);
+    try {
+      const data = await createResumeFromText(source, jobDescription, true);
+      const resume = (data.resume || data) as Record<string, unknown>;
+      if (data.html && typeof data.html === "string") {
+        setHtmlPreview(data.html);
+      } else {
+        const rendered = await renderResumeHtml(resume);
+        setHtmlPreview(rendered.html || "");
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Tailor failed");
+    } finally {
+      setTailoring(false);
+    }
+  }
+
+  function downloadHtml() {
+    const blob = new Blob([htmlPreview], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tailored-resume.html";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <div className="animate-fade-in" style={{ maxWidth: 1000, margin: "0 auto" }}>
@@ -119,11 +183,12 @@ export default function ResumePage() {
                 {loading ? <span className="spinner" style={{ width: 16, height: 16 }} /> : "Scan & Analyze"}
               </button>
             </form>
+            <ResumeFromText jobDescription={jobDescription} onText={setExtractedText} />
           </div>
         </div>
 
         {/* Right Column: Results */}
-        <div style={{ flex: "1 1 400px", display: "flex", flexDirection: "column" }}>
+        <div style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
           {results ? (
             <div className="glass-card animate-slide-in" style={{ padding: 24, flex: 1 }}>
               <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 24 }}>Analysis Results</h2>
@@ -178,13 +243,18 @@ export default function ResumePage() {
                 </ul>
               </div>
 
-              <div style={{ marginTop: 24, paddingTop: 24, borderTop: "1px solid var(--border-primary)" }}>
-                <button className="btn btn-secondary" style={{ width: "100%" }}>
-                  <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                    <path d="M12 4v16m8-8H4" />
-                  </svg>
-                  Generate Tailored Resume
+              <div style={{ marginTop: 24, paddingTop: 24, borderTop: "1px solid var(--border-primary)", display: "flex", flexDirection: "column", gap: 8 }}>
+                <button type="button" className="btn btn-secondary" style={{ width: "100%" }} onClick={() => void handleTailor()} disabled={tailoring}>
+                  {tailoring ? "Tailoring…" : "Generate Tailored Resume"}
                 </button>
+                {htmlPreview && (
+                  <>
+                    <button type="button" className="btn btn-primary" style={{ width: "100%" }} onClick={downloadHtml}>
+                      Download HTML
+                    </button>
+                    <iframe title="Resume preview" srcDoc={htmlPreview} style={{ width: "100%", minHeight: 360, border: "1px solid var(--border-primary)", borderRadius: 12, background: "white" }} />
+                  </>
+                )}
               </div>
 
             </div>

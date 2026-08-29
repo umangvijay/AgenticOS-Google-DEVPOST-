@@ -27,7 +27,6 @@ class TailorRequest(BaseModel):
 from fastapi import UploadFile, File, Form
 import pdfplumber
 import io
-from google.adk.models.google_llm import Gemini
 from backend.config.settings import settings
 import json
 
@@ -58,14 +57,10 @@ async def scan_resume(
         if not text.strip():
             raise HTTPException(status_code=400, detail="Could not extract text from the file.")
             
-        # Analyze with Gemini
-        client_kwargs = {}
-        if not settings.GEMINI_API_KEY:
-            client_kwargs = {"vertexai": True, "project": settings.GOOGLE_CLOUD_PROJECT, "location": settings.GOOGLE_CLOUD_REGION}
-        else:
-            client_kwargs = {"api_key": settings.GEMINI_API_KEY}
-            
-        llm = Gemini(model=settings.GEMINI_MODEL, client_kwargs=client_kwargs)
+        # Analyze with Gemini via google.genai
+        from google import genai
+        
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
         
         prompt = f"""
 You are an expert ATS (Applicant Tracking System) Analyzer.
@@ -85,7 +80,10 @@ Provide your analysis in JSON format with exactly these keys:
 
 Output ONLY valid JSON.
 """
-        response = llm.generate_content(prompt)
+        response = client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=prompt
+        )
         response_text = response.text
         
         # Clean up markdown code blocks if present
@@ -95,11 +93,33 @@ Output ONLY valid JSON.
             response_text = response_text[:-3]
             
         result = json.loads(response_text.strip())
+        result["extracted_text"] = text[:20000]
         return result
         
     except Exception as e:
         logger.error(f"Error scanning resume: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+class CreateResumeRequest(BaseModel):
+    profile_text: str
+    job_description: str = ""
+    tailor: bool = False
+
+
+@router.post("/create", status_code=status.HTTP_200_OK)
+async def create_resume(
+    body: CreateResumeRequest,
+    user: AuthenticatedUser = Depends(require_not_viewer),
+):
+    """Build an ATS-ready resume from free-form text; optionally score/tailor against a JD."""
+    check_rate_limit(f"user:{user.user_id}", "resume_analyze")
+    try:
+        from backend.services.resume_builder import create_and_score
+        return await create_and_score(body.profile_text, body.job_description, tailor=body.tailor)
+    except Exception as e:
+        logger.error(f"Error creating resume: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.post("/analyze", status_code=status.HTTP_200_OK)
 async def analyze_resume(
@@ -151,5 +171,33 @@ async def tailor_resume(
         logger.error(f"Error tailoring resume: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
-# Note: We omit /render for now as WeasyPrint is quite heavy and it's 
-# mocked out in the current implementation of the services.
+
+class RenderRequest(BaseModel):
+    resume: Dict[str, Any]
+    format: str = "html"
+
+
+@router.post("/render", status_code=status.HTTP_200_OK)
+async def render_resume(
+    body: RenderRequest,
+    user: AuthenticatedUser = Depends(require_not_viewer),
+):
+    """Render a structured resume to HTML (and PDF when WeasyPrint is available)."""
+    check_rate_limit(f"user:{user.user_id}", "resume_analyze")
+    try:
+        resume = Resume.model_validate(body.resume)
+        from backend.services.resume_renderer import ResumeRendererService
+        renderer = ResumeRendererService()
+        html = renderer.render_html(resume)
+        if (body.format or "html").lower() == "pdf":
+            try:
+                from fastapi.responses import Response
+                pdf = renderer.render_pdf(resume)
+                return Response(content=pdf, media_type="application/pdf")
+            except Exception as exc:
+                logger.warning("PDF render unavailable: %s", exc)
+                return {"html": html, "pdf_error": "PDF renderer unavailable; HTML is included instead."}
+        return {"html": html}
+    except Exception as e:
+        logger.error("Error rendering resume: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))

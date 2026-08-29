@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getIntegration, enableIntegration, disableIntegration, deleteIntegration, testIntegration, Integration } from "@/lib/api";
+import { getIntegration, enableIntegration, disableIntegration, deleteIntegration, testIntegration, storeCredential, Integration } from "@/lib/api";
 
 export default function IntegrationDetailPage() {
   const params = useParams();
@@ -13,6 +13,8 @@ export default function IntegrationDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [testing, setTesting] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [keyBusy, setKeyBusy] = useState(false);
 
   async function load() {
     try {
@@ -175,6 +177,36 @@ export default function IntegrationDetailPage() {
                 </div>
               )}
             </div>
+          </div>
+
+          <div className="glass-card" style={{ padding: 20 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Attach API key
+            </h3>
+            <p style={{ fontSize: 13, color: "var(--text-tertiary)", marginBottom: 12 }}>
+              Stored in the Vault as AES-256-GCM. The value is never shown again.
+            </p>
+            <input className="input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="api_key" style={{ width: "100%", marginBottom: 8 }} autoComplete="off" />
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ width: "100%" }}
+              disabled={keyBusy || !apiKey.trim()}
+              onClick={async () => {
+                setKeyBusy(true);
+                try {
+                  await storeCredential((mcp.name || mcpId).replace(/\s+/g, "-").toLowerCase(), { api_key: apiKey.trim() });
+                  setApiKey("");
+                  alert("Key stored in Vault.");
+                } catch (err) {
+                  alert(err instanceof Error ? err.message : "Could not store key");
+                } finally {
+                  setKeyBusy(false);
+                }
+              }}
+            >
+              {keyBusy ? "Saving…" : "Save to Vault"}
+            </button>
           </div>
 
           <div className="glass-card" style={{ padding: 20 }}>

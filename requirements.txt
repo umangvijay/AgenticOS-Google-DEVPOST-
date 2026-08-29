@@ -31,6 +31,7 @@ google-cloud-scheduler==2.20.0
 google-genai==2.19.0
 googleapis-common-protos==1.75.1
 graphviz==0.21
+greenlet==3.5.5
 grpc-google-iam-v1==0.14.5
 grpcio==1.83.0
 grpcio-status==1.83.0
@@ -54,6 +55,7 @@ packaging==26.3
 pdfminer-six==20260107
 pdfplumber==0.11.10
 pillow==12.3.0
+playwright==1.57.0
 pluggy==1.6.0
 propcache==0.5.2
 proto-plus==1.28.3
@@ -65,6 +67,7 @@ pydantic==2.13.4
 pydantic-core==2.46.4
 pydantic-settings==2.15.0
 pydyf==0.12.1
+pyee==13.0.1
 pygments==2.21.0
 pyjwt==2.13.0
 pypdfium2==5.13.0
