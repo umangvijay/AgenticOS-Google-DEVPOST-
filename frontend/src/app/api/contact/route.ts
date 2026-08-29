@@ -40,6 +40,8 @@ export async function GET() {
     return NextResponse.json({ smtp_configured: false, to: TO, setup: "Start the AgentOS backend, then set CONTACT_SMTP_PASSWORD in .env." });
   }
 }
+
+export async function POST(request: Request) {
   try {
     const body = await request.json();
     const email = String(body.email || "").trim();

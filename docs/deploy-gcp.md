@@ -68,7 +68,7 @@ gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
   --role="roles/aiplatform.user"
 ```
 
-Vertex usage is **usage-based** and draws down credits. Flash is cheaper than Pro. Keep `GEMINI_MODEL=gemini-2.5-flash` or `gemini-3.5-flash` / `gemini-3.6-flash` as in `.env.example`. Heavy chat + MCP builds can spend more than Cloud Run CPU.
+Vertex usage is **usage-based** and draws down credits. Flash is cheaper than Pro. Keep `GEMINI_MODEL=gemini-3.6-flash` (fallback `gemini-3.5-flash`). Do not use Gemini 2.x. Heavy chat + MCP builds can spend more than Cloud Run CPU.
 
 ---
 
@@ -81,31 +81,40 @@ Vertex usage is **usage-based** and draws down credits. Flash is cheaper than Pr
 python3 -c "import secrets; print(secrets.token_urlsafe(48))" | \
   gcloud secrets create secrets-master-key --data-file=-
 
+# JWT PEMs — required in production (Cloud Run has no durable disk for auto-generated keys)
+openssl genrsa -out /tmp/jwt-private.pem 2048
+openssl rsa -in /tmp/jwt-private.pem -pubout -out /tmp/jwt-public.pem
+gcloud secrets create jwt-private-key --data-file=/tmp/jwt-private.pem
+gcloud secrets create jwt-public-key --data-file=/tmp/jwt-public.pem
+rm -f /tmp/jwt-private.pem /tmp/jwt-public.pem
+
 # Optional contact form: Gmail App Password only, never the mailbox password
 # echo -n 'xxxx xxxx xxxx xxxx' | gcloud secrets create contact-smtp-password --data-file=-
 ```
 
-**Do not** create `gemini-api-key` if you are using Vertex.
+**Do not** create `gemini-api-key` if you are using Vertex. Do **not** set `GEMINI_API_KEY` on Cloud Run.
+
+Grant the Cloud Run runtime SA access to those secrets (`roles/secretmanager.secretAccessor`) and to Firestore (`roles/datastore.user`).
 
 ---
 
-## 5. Durable data (recommended) or cheap demo disk
+## 5. Durable data (Firestore)
 
-**SQLite on Cloud Run is deleted** when the instance scales to zero. Fine for a 10-minute demo.
-
-For a contest URL that survives overnight, Firestore now covers users, workflows, MCP catalog, vault ciphertext, settings, schedules, and refresh tokens (same product surface as local SQLite):
+**SQLite on Cloud Run is deleted** when the instance scales to zero. Local development still uses SQLite (`STORAGE_BACKEND=sqlite`). Production Cloud Run must use Firestore.
 
 ```bash
 gcloud firestore databases create --location=nam5 --type=firestore-native --project=YOUR_PROJECT_ID
 ```
 
-Use `STORAGE_BACKEND=firestore` in the next step. Firestore is billed (usually small at hackathon scale).
+Set `STORAGE_BACKEND=firestore` and `GOOGLE_CLOUD_PROJECT` on the API service. Do not use Firebase Realtime Database.
 
 ---
 
-## 6. Deploy the API (Cloud Run) — use this if Console failed
+## 6. Deploy the API (Cloud Run)
 
-Why deploys fail: Cloud Console looks for a root **`Dockerfile`** (this repo used to only have `Dockerfile.api`); Playwright Chromium made Cloud Build time out; `pip --no-deps` missed packages; WeasyPrint needed OS libraries; **Firestore before a database exists** crashes the new revision; the local folder `AgenticOS(Google DEVPOST)` has parentheses that break some uploads. First deploy now uses **SQLite** so the service actually starts.
+Use the root **`Dockerfile`**. Do not deploy a second worker service. `cloudbuild.yaml` builds the API image only; if Cloud Run GitHub continuous deployment is already connected, do **not** also add a Cloud Build trigger on `cloudbuild.yaml`.
+
+Create the Firestore database and Secret Manager secrets (section 4–5) **before** this deploy. Production startup requires `SECRETS_MASTER_KEY` and JWT PEMs.
 
 ### Cloud Shell (recommended)
 
@@ -115,8 +124,8 @@ Open [shell.cloud.google.com](https://shell.cloud.google.com) **in the project t
 export PROJECT_ID=YOUR_PROJECT_ID
 gcloud config set project "$PROJECT_ID"
 
-git clone https://github.com/umangvijay/AgenticOS-Google-DEVPOST-.git
-cd AgenticOS-Google-DEVPOST-
+git clone https://github.com/umangvijay/AgenticOS-Google-DEVPOST.git
+cd AgenticOS-Google-DEVPOST
 
 bash scripts/gcp/deploy-api-cloudshell.sh
 ```
@@ -135,18 +144,22 @@ gcloud run deploy agentos-api \
   --memory 1Gi \
   --cpu 1 \
   --timeout 300 \
-  --set-env-vars "APP_ENV=production,STORAGE_BACKEND=sqlite,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=us-central1,GEMINI_MODEL=gemini-2.5-flash"
+  --set-env-vars "APP_ENV=production,STORAGE_BACKEND=firestore,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_REGION=us-central1,GEMINI_MODEL=gemini-3.6-flash" \
+  --set-secrets "SECRETS_MASTER_KEY=secrets-master-key:latest,JWT_PRIVATE_KEY=jwt-private-key:latest,JWT_PUBLIC_KEY=jwt-public-key:latest"
 ```
+
+Do **not** set `GEMINI_API_KEY`. Vertex uses Application Default Credentials / the Cloud Run service account.
 
 There is a root `Dockerfile`. You do **not** need `--dockerfile Dockerfile.api`.
 
 ### Cloud Console (manual)
 
 1. [Cloud Run](https://console.cloud.google.com/run) → **Create service**.
-2. **Continuously deploy from a repository** (GitHub: `umangvijay/AgenticOS-Google-DEVPOST-`) **or** deploy from Cloud Shell source (the clone above).
-3. Build type: **Dockerfile**. Path: **`Dockerfile`** at the repo root.
+2. **Continuously deploy from a repository** (GitHub: `umangvijay/AgenticOS-Google-DEVPOST`) **or** deploy from Cloud Shell source (the clone above).
+3. Build type: **Dockerfile**. Path: **`Dockerfile`** at the repo root. Do not connect a second Cloud Build trigger to `cloudbuild.yaml`.
 4. Region `us-central1`. Allow unauthenticated. Memory **1 GiB**. Request timeout 300s. Container port **8080**.
-5. Variables: `APP_ENV=production`, `STORAGE_BACKEND=sqlite`, `GOOGLE_CLOUD_PROJECT=<id>`, `GOOGLE_CLOUD_REGION=us-central1`. Do **not** set `GEMINI_API_KEY`.
+5. Variables: `APP_ENV=production`, `STORAGE_BACKEND=firestore`, `GOOGLE_CLOUD_PROJECT=<id>`, `GOOGLE_CLOUD_REGION=us-central1`, `GEMINI_MODEL=gemini-3.6-flash`. Do **not** set `GEMINI_API_KEY`.
+6. Secrets: `SECRETS_MASTER_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY` from Secret Manager.
 
 Wait until the revision is **green**, then:
 
@@ -154,26 +167,31 @@ Wait until the revision is **green**, then:
 curl -sS "$(gcloud run services describe agentos-api --region us-central1 --format='value(status.url)')/health"
 ```
 
-Expect `"status":"healthy"` and `"storage":"sqlite"`. After that, create Firestore and switch `STORAGE_BACKEND=firestore` (step 5). Optional: `--set-secrets SECRETS_MASTER_KEY=secrets-master-key:latest`.
+Expect `"status":"healthy"`, `"storage":"firestore"`, and `"llm":"vertex"`.
 
-Grant Vertex to the runtime SA:
+Grant Vertex and Firestore to the runtime SA:
 
 ```bash
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   --role="roles/aiplatform.user"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/datastore.user"
 ```
 
 ### If it still fails
 
 | Symptom | Fix |
 | --- | --- |
+| `No module named 'bcrypt'` | Rebuild from latest `main` (`bcrypt==5.0.0` is in `requirements.txt`). |
 | Build timeout / Playwright / Chromium | This Dockerfile no longer installs browsers. Pull latest `main` and redeploy. |
 | `unrecognized arguments: --dockerfile` | Old `gcloud`. Use root `Dockerfile` and omit `--dockerfile`. |
-| Revision not ready / container failed | Cloud Run → service → **Logs**. Often Firestore with no database — keep `STORAGE_BACKEND=sqlite` first. |
-| APIs / billing | Enable `run`, `cloudbuild`, `artifactregistry`, `aiplatform`. Link billing. |
+| Revision not ready / container failed | Logs: missing Secret Manager secrets, or Firestore database not created, or `GOOGLE_CLOUD_PROJECT` unset. |
+| APIs / billing | Enable `run`, `cloudbuild`, `artifactregistry`, `aiplatform`, `firestore`, `secretmanager`. Link billing. |
 | Build context huge | Clone GitHub in Cloud Shell; do not upload `AgenticOS(Google DEVPOST)`. |
+| Two Cloud Run services after a push | Disconnect any Cloud Build trigger that deployed `agenticos-worker`. Use only the API service from the root Dockerfile. |
 
 ---
 
@@ -182,10 +200,8 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
 ```bash
 cd frontend
 
-# Next.js reads API URL at build time
-export NEXT_PUBLIC_API_URL="https://YOUR-API-URL"
-export API_BASE_URL="https://YOUR-API-URL"
-
+# Next.js bakes NEXT_PUBLIC_API_URL at image build time. Include /api/v1.
+# Cloud Run sets PORT at runtime; the frontend image listens on ${PORT:-8080}.
 gcloud run deploy agentos-frontend \
   --source . \
   --dockerfile Dockerfile.frontend \
@@ -194,14 +210,16 @@ gcloud run deploy agentos-frontend \
   --min-instances 0 \
   --max-instances 4 \
   --memory 512Mi \
+  --port 8080 \
+  --set-build-env-vars "NEXT_PUBLIC_API_URL=https://YOUR-API-URL/api/v1" \
   --project=YOUR_PROJECT_ID
 ```
 
-Copy the frontend URL. Update the API CORS and public URLs:
+Copy the frontend URL. Update the API CORS (comma-separated origin, no localhost):
 
 ```bash
 gcloud run services update agentos-api --region us-central1 \
-  --update-env-vars "FRONTEND_BASE_URL=https://YOUR-FRONTEND-URL,CORS_ALLOWED_ORIGINS=[\"https://YOUR-FRONTEND-URL\"]"
+  --update-env-vars "FRONTEND_BASE_URL=https://YOUR-FRONTEND-URL,CORS_ALLOWED_ORIGINS=https://YOUR-FRONTEND-URL"
 ```
 
 Open the frontend URL. **Get started for free**, then use chat MCP as on localhost.

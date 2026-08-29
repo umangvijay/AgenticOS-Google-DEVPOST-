@@ -22,10 +22,12 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY backend ./backend
 COPY main.py ./main.py
 
+# STORAGE_BACKEND is not baked in. Local docker defaults to sqlite via Settings.
+# Cloud Run production must set STORAGE_BACKEND=firestore (and GOOGLE_CLOUD_PROJECT).
+# Do not set GEMINI_API_KEY. Vertex uses ADC / the Cloud Run service account.
 ENV PYTHONPATH=/app \
     PORT=8080 \
     APP_ENV=production \
-    STORAGE_BACKEND=sqlite \
     PYTHONUNBUFFERED=1
 
 EXPOSE 8080

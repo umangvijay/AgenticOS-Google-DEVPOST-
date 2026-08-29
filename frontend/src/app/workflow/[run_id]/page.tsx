@@ -39,8 +39,8 @@ export default function WorkflowExecutionPage() {
       const data = await getWorkflow(runId);
       setWorkflow(data);
       
-      const pendingApprovals = await listApprovals();
-      setApprovals(pendingApprovals.filter(a => a.run_id === runId));
+      const pending = await listApprovals();
+      setApprovals((pending.approvals || []).filter(a => a.run_id === runId));
       
       setError("");
       return data;

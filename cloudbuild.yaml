@@ -1,55 +1,15 @@
-# Builds API + worker images (same FastAPI binary today) and deploys Cloud Run.
-# Do not pass .env or App Passwords as substitutions — use Secret Manager.
+# API image only (root Dockerfile). No worker service.
+# Cloud Run GitHub continuous deployment should use the root Dockerfile
+# and should NOT also attach a trigger to this file — that would double-build.
+# `gcloud run deploy --source` uses this file if present; it must not deploy
+# a second service. Cloud Run itself deploys the image this build produces.
 timeout: 1800s
 options:
   logging: CLOUD_LOGGING_ONLY
 steps:
-  # 1. Build the API Image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/api:${COMMIT_SHA}', '-f', 'Dockerfile.api', '.']
-
-  # 2. Build the Worker Image
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/worker:${COMMIT_SHA}', '-f', 'Dockerfile.worker', '.']
-
-  # 3. Push API Image
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/api:${COMMIT_SHA}']
-
-  # 4. Push Worker Image
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/worker:${COMMIT_SHA}']
-
-  # 5. Deploy API to Cloud Run
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
-    args:
-      - 'run'
-      - 'deploy'
-      - 'agenticos-api'
-      - '--image'
-      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/api:${COMMIT_SHA}'
-      - '--region'
-      - '${_REGION}'
-      - '--quiet'
-
-  # 6. Deploy Worker to Cloud Run
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
-    args:
-      - 'run'
-      - 'deploy'
-      - 'agenticos-worker'
-      - '--image'
-      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/worker:${COMMIT_SHA}'
-      - '--region'
-      - '${_REGION}'
-      - '--quiet'
-
-substitutions:
-  _REGION: 'us-central1'
-  _REPO_NAME: 'agenticos-repo'
-
+    args: ['build', '-t', '${_IMAGE}', '-f', 'Dockerfile', '.']
 images:
-  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/api:${COMMIT_SHA}'
-  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/worker:${COMMIT_SHA}'
+  - '${_IMAGE}'
+substitutions:
+  _IMAGE: 'gcr.io/${PROJECT_ID}/agentos-api'

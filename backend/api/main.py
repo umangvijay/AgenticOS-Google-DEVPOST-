@@ -21,6 +21,8 @@ import asyncio
 import json
 import traceback
 
+from pathlib import Path
+
 from backend.config.settings import settings
 from backend.api.dependencies.auth import get_current_user, AuthenticatedUser
 from backend.security.input_sanitizer import sanitize_goal, InputValidationError
@@ -104,12 +106,15 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     origins = " ".join(settings.CORS_ALLOWED_ORIGINS) if settings.CORS_ALLOWED_ORIGINS else "'self'"
+    connect_src = f"connect-src 'self' {origins}"
+    if settings.APP_ENV == "development":
+        connect_src += " http://127.0.0.1:8000 http://localhost:8000"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
-        f"connect-src 'self' {origins} http://127.0.0.1:8000 http://localhost:8000"
+        f"{connect_src}"
     )
     if settings.APP_ENV != "development":
         response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
@@ -140,6 +145,26 @@ async def startup_event():
     logger.info(f"Starting {settings.APP_NAME} v2.0.0 [{settings.APP_ENV}]")
     logger.info(f"Storage backend: {settings.STORAGE_BACKEND}")
     logger.info(f"Gemini model: {settings.GEMINI_MODEL}")
+
+    if settings.APP_ENV == "production":
+        if not (settings.SECRETS_MASTER_KEY or "").strip():
+            raise RuntimeError(
+                "SECRETS_MASTER_KEY is required when APP_ENV=production. "
+                "Mount it from Secret Manager on Cloud Run."
+            )
+        has_jwt_env = bool(
+            (settings.JWT_PRIVATE_KEY or "").strip()
+            and (settings.JWT_PUBLIC_KEY or "").strip()
+        )
+        has_jwt_files = (
+            Path(settings.JWT_PRIVATE_KEY_PATH).exists()
+            and Path(settings.JWT_PUBLIC_KEY_PATH).exists()
+        )
+        if not has_jwt_env and not has_jwt_files:
+            raise RuntimeError(
+                "JWT_PRIVATE_KEY and JWT_PUBLIC_KEY are required when APP_ENV=production "
+                "(or persist PEM files). Mount the PEMs from Secret Manager on Cloud Run."
+            )
 
     # 1. Initialize Repository Factory
     from backend.repositories.factory import RepositoryFactory

@@ -12,6 +12,8 @@ export default function SettingsPage() {
   const [message, setMessage] = useState({ text: "", type: "" });
 
   const [name, setName] = useState(user?.name || "");
+  const [geminiKey, setGeminiKey] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
   const [grokKey, setGrokKey] = useState("");
   const [savingGrok, setSavingGrok] = useState(false);
   const [testingKey, setTestingKey] = useState(false);

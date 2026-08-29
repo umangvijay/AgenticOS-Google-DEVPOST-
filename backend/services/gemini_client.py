@@ -47,17 +47,29 @@ def is_retryable_model_error(exc: BaseException) -> bool:
     )
 
 
+def _is_gemini_35_or_newer(model: str) -> bool:
+    """Keep Gemini 3.5+ only. Do not invent model IDs."""
+    name = (model or "").strip().lower()
+    if not name.startswith("gemini-"):
+        return True
+    rest = name[len("gemini-"):]
+    if rest.startswith("1.") or rest.startswith("2."):
+        return False
+    return True
+
+
 def _candidate_models(preferred: Optional[str] = None) -> list:
     primary = preferred or settings.GEMINI_MODEL
     extras = (
         "gemini-3.5-flash",
         "gemini-3.5-flash-lite",
-        "gemini-2.5-flash",
     )
     out = []
     for model in (primary, *extras):
-        if model and model not in out:
+        if model and model not in out and _is_gemini_35_or_newer(model):
             out.append(model)
+    if not out and primary:
+        out.append(primary)
     return out
 
 
